@@ -54,10 +54,10 @@ class GraphError(Exception):
     pass
 
 
-def graph(token, path, method="GET", body=None, fatal=True):
+def graph(token, path, method="GET", body=None, fatal=True, headers=None):
     safe_path = urllib.parse.quote(path, safe="/?$=&'()+,:@")
     req = urllib.request.Request(GRAPH + safe_path, method=method,
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json", **(headers or {})},
         data=json.dumps(body).encode() if body is not None else None)
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
@@ -320,7 +320,7 @@ def thread_previews(rows, exclude_id=None):
 
 def draft_output(token, args, draft_id, kind, intended_reply, body, in_reply_to=None):
     d = graph(token, f"/me/messages/{draft_id}?$select=id,conversationId,subject,"
-                     f"toRecipients,ccRecipients,webLink")
+                     f"toRecipients,ccRecipients,webLink,internetMessageId")
     rows = conversation(token, d["conversationId"]) if d.get("conversationId") and in_reply_to else []
     return {
         "draft_id": d["id"],
@@ -334,6 +334,7 @@ def draft_output(token, args, draft_id, kind, intended_reply, body, in_reply_to=
         "conversation_id": d.get("conversationId"),
         "in_reply_to": in_reply_to,
         "web_link": d.get("webLink"),
+        "internet_message_id": d.get("internetMessageId"),
         "body": body,
         "thread": thread_previews(rows, exclude_id=d["id"]),
         "note": "in the owner's Drafts for review — never sent",
@@ -357,19 +358,32 @@ def create_reply(token, args, reply_to, body, sender_only):
     return draft["id"], ("reply" if sender_only else "reply_all"), target["id"]
 
 
-def record(args, draft_id, kind, in_reply_to, sender_only=False):
+BODY_KEEP = 4000
+
+
+def record(args, draft_id, kind, in_reply_to, sender_only=False, out=None):
+    """Remember a draft this tool made. Besides the guard fields, keep what the intern
+    wrote and how to find the sent copy later (sent-drafts: learning from the owner's edits)."""
     from datetime import datetime, timezone
+    out = out or {}
     ledger = load_ledger(args.mailbox_dir)
     ledger[draft_id] = {"kind": kind, "in_reply_to": in_reply_to, "sender_only": sender_only,
-                        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+                        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "intern": os.environ.get("INTERNS_INTERN") or None,
+                        "body": (args.body or "")[:BODY_KEEP],
+                        "subject": out.get("subject") or "",
+                        "to": out.get("to") or [],
+                        "conversation_id": out.get("conversation_id"),
+                        "internet_message_id": out.get("internet_message_id")}
     save_ledger(args.mailbox_dir, ledger)
 
 
 def cmd_draft(token, args):
     if args.reply_to:
         draft_id, kind, target = create_reply(token, args, args.reply_to, args.body, args.sender_only)
-        record(args, draft_id, kind, target, args.sender_only)
-        return draft_output(token, args, draft_id, kind, True, args.body, in_reply_to=target)
+        out = draft_output(token, args, draft_id, kind, True, args.body, in_reply_to=target)
+        record(args, draft_id, kind, target, args.sender_only, out)
+        return out
     to = [a.strip() for a in args.to.split(",") if a.strip()]
     if not to:
         die("a new email needs --to (or use --reply-to <messageId> to reply in a thread)", EXIT_USAGE)
@@ -378,8 +392,9 @@ def cmd_draft(token, args):
         "body": {"contentType": "HTML", "content": text_to_html(args.body)},
         "toRecipients": [{"emailAddress": {"address": a}} for a in to],
     })
-    record(args, d["id"], "new", None)
-    return draft_output(token, args, d["id"], "new", False, args.body)
+    out = draft_output(token, args, d["id"], "new", False, args.body)
+    record(args, d["id"], "new", None, out=out)
+    return out
 
 
 def owned(args, draft_id):
@@ -414,14 +429,16 @@ def cmd_revise_draft(token, args):
     if entry["kind"] == "new":
         graph(token, f"/me/messages/{args.draft_id}", "PATCH",
               {"body": {"contentType": "HTML", "content": text_to_html(args.body)}})
-        return draft_output(token, args, args.draft_id, "new", False, args.body)
+        out = draft_output(token, args, args.draft_id, "new", False, args.body)
+        record(args, args.draft_id, "new", None, out=out)
+        return out
     # A reply is recreated from the message it answers, so the quoted history
     # is Graph's own again; the superseded draft goes to Deleted Items.
     sender_only = bool(entry.get("sender_only"))
     draft_id, kind, target = create_reply(token, args, entry["in_reply_to"], args.body, sender_only)
-    record(args, draft_id, kind, target, sender_only)
-    moved = bin_draft(token, args, args.draft_id, strict=False)
     out = draft_output(token, args, draft_id, kind, True, args.body, in_reply_to=target)
+    record(args, draft_id, kind, target, sender_only, out)
+    moved = bin_draft(token, args, args.draft_id, strict=False)
     out["replaces"] = args.draft_id
     if not moved:
         out["warning"] = ("the previous draft could not be moved to Deleted Items (the owner may have sent or deleted it) — "
@@ -433,6 +450,75 @@ def cmd_delete_draft(token, args):
     owned(args, args.draft_id)
     bin_draft(token, args, args.draft_id)
     return {"draft_id": args.draft_id, "deleted": True, "note": "moved to Deleted Items (recoverable)"}
+
+
+# --------------------------------------------------------------- sent-drafts
+
+SENT_LOOKBACK_DAYS = 14
+GIVE_UP_DAYS = 7
+TEXT_BODY = {"Prefer": 'outlook.body-content-type="text"'}
+
+
+def find_sent(token, entry):
+    """The sent copy of a draft: same Message-ID, else the first message the owner sent in its
+    conversation after the draft was made. Only the new text (uniqueBody), no quoted thread."""
+    select = "$select=id,subject,sentDateTime,toRecipients,uniqueBody"
+    mid = entry.get("internet_message_id")
+    if mid:
+        r = graph(token, f"/me/mailFolders/sentitems/messages?$filter=internetMessageId eq '{mid}'&{select}",
+                  fatal=False, headers=TEXT_BODY)
+        if r.get("value"):
+            return r["value"][0]
+    conv = entry.get("conversation_id")
+    if conv:
+        r = graph(token, f"/me/mailFolders/sentitems/messages?$filter=conversationId eq '{conv}'&{select}&$top=25",
+                  fatal=False, headers=TEXT_BODY)
+        later = [m for m in r.get("value", []) if (m.get("sentDateTime") or "") >= entry.get("created_at", "")]
+        if later:
+            return min(later, key=lambda m: m.get("sentDateTime") or "")
+    return None
+
+
+def cmd_sent_drafts(token, args):
+    """READ-ONLY. Drafts this tool made that the owner has since sent, with the intern's text
+    next to the text that went out — so the crew can learn from the owner's edits. Each draft
+    is reported once; drafts deleted unsent are dropped after a week."""
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    stamp = lambda d: d.strftime("%Y-%m-%dT%H:%M:%SZ")
+    ledger = load_ledger(args.mailbox_dir)
+    found, changed = [], False
+    for draft_id, entry in ledger.items():
+        if entry.get("harvest") or not entry.get("body"):
+            continue
+        created = entry.get("created_at", "")
+        if created < stamp(now - timedelta(days=SENT_LOOKBACK_DAYS)):
+            continue
+        try:
+            still = graph(token, f"/me/messages/{draft_id}?$select=id,isDraft", fatal=False)
+            if still.get("isDraft"):
+                continue  # still waiting in Drafts
+        except GraphError:
+            pass  # moved (sent or deleted): ids change when a message changes folder
+        try:
+            sent = find_sent(token, entry)
+        except GraphError:
+            continue
+        if sent:
+            found.append({"draft_id": draft_id, "intern": entry.get("intern"), "mailbox": args.mailbox,
+                          "kind": entry.get("kind"), "subject": sent.get("subject") or entry.get("subject") or "",
+                          "to": [a for a in (_addr(r) for r in sent.get("toRecipients", [])) if a],
+                          "intern_body": entry["body"],
+                          "sent_body": ((sent.get("uniqueBody") or {}).get("content") or "").strip()[:BODY_KEEP],
+                          "sent_at": sent.get("sentDateTime")})
+            entry["harvest"] = "sent"
+            changed = True
+        elif created < stamp(now - timedelta(days=GIVE_UP_DAYS)):
+            entry["harvest"] = "gone"
+            changed = True
+    if changed:
+        save_ledger(args.mailbox_dir, ledger)
+    return {"mailbox": args.mailbox, "sent": found}
 
 
 def main():
@@ -447,6 +533,7 @@ def main():
         s.add_argument("--top", type=int, default=25)
     s = sub.add_parser("thread"); s.add_argument("conversation_id")
     s = sub.add_parser("search"); s.add_argument("query"); s.add_argument("--top", type=int, default=15)
+    sub.add_parser("sent-drafts", help="READ-ONLY: drafts this tool made that the owner has sent, with both texts")
     s = sub.add_parser("drafts")
     s.add_argument("--top", type=int, default=50)
     s.add_argument("--min-age-hours", dest="min_age_hours", type=float, default=24.0)
@@ -470,7 +557,7 @@ def main():
     token = get_token(args.mailbox_dir)
     out = {"whoami": cmd_whoami, "inbox": cmd_inbox, "sent": cmd_sent,
            "thread": cmd_thread, "search": cmd_search, "draft": cmd_draft,
-           "drafts": cmd_drafts, "revise-draft": cmd_revise_draft,
+           "drafts": cmd_drafts, "revise-draft": cmd_revise_draft, "sent-drafts": cmd_sent_drafts,
            "delete-draft": cmd_delete_draft}[args.cmd](token, args)
     print(json.dumps(out, indent=1))
 

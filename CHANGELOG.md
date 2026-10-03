@@ -18,6 +18,13 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - **Personality dials** (`style` in the manifest): tone, length, initiative and humour,
   1–5 each. Moved dials add a "Style" block to the intern's prompt. The hire model sets
   them, the starters carry presets, and the dials can be changed on the profile.
+- **Learning from your draft edits.** When you edit an intern's Outlook draft before
+  sending it, the edit is kept. That's the text the intern wrote next to what went out,
+  ignoring a signature Outlook adds. After two edits, one cheap model call looks for a
+  pattern, and the intern asks in its chat whether to make it a standing order: Save it /
+  Not now / Never.
+  - `graph-mail` now remembers which intern wrote each draft, and has a new read-only
+    `sent-drafts` command.
 - **Interview before hiring** (`POST /hire/interview`): put a question to a candidate and
   hear them answer in character. Nobody is hired; the coordinator pays for the call.
 - **Instagram research connector.** Connect your Business or Creator account in

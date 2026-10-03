@@ -32,11 +32,18 @@ class FakeGraph:
         }
         self.calls = []
         self.n = 0
+        self.sent = []  # what the owner sent (Sent Items), for sent-drafts
 
-    def __call__(self, token, path, method="GET", body=None, fatal=True):
+    def __call__(self, token, path, method="GET", body=None, fatal=True, headers=None):
         self.calls.append((method, path.split("?")[0], body))
         base = path.split("?")[0]
         if base == "/me/mailFolders/sentitems/messages":
+            if "internetMessageId eq '" in path:
+                mid = path.split("internetMessageId eq '")[1].split("'")[0]
+                return {"value": [m for m in self.sent if m.get("internetMessageId") == mid]}
+            if "conversationId eq '" in path:
+                conv = path.split("conversationId eq '")[1].split("'")[0]
+                return {"value": [m for m in self.sent if m.get("conversationId") == conv]}
             return {"value": [{"from": {"emailAddress": {"address": ME}}}]}
         if base == "/me/messages" and method == "GET":
             conv = path.split("conversationId eq '")[1].split("'")[0]
@@ -58,7 +65,7 @@ class FakeGraph:
                                   "from": {"emailAddress": {"address": ME}}, "subject": "RE: ClinicFlow",
                                   "toRecipients": [src["from"]], "ccRecipients": cc,
                                   "body": {"contentType": "HTML", "content": QUOTED}, "webLink": f"https://owa/{did}",
-                                  "receivedDateTime": "2026-09-30T00:00:00Z"}
+                                  "receivedDateTime": "2026-09-30T00:00:00Z", "internetMessageId": f"<{did}@northwind.example>"}
             return {"id": did}
         if len(parts) == 5 and parts[4] == "move":
             if mid not in self.messages:
@@ -68,6 +75,8 @@ class FakeGraph:
         if method == "PATCH":
             self.messages[mid].update(body)
             return {}
+        if mid not in self.messages:  # Graph: an id stops resolving once the message changes folder
+            raise gm.GraphError(f"graph GET {path}: HTTP 404 not found")
         return self.messages[mid]
 
 
@@ -188,6 +197,60 @@ def t_new_email_needs_to():
     args.to, args.subject = "a@b.co", "Hi"
     out = gm.cmd_draft("tok", args)
     assert out["kind"] == "new" and not out["intended_reply"] and out["to"] == ["a@b.co"]
+
+
+def t_sent_drafts_pairs_the_interns_text_with_what_was_sent():
+    fake, args = fresh()
+    os.environ["INTERNS_INTERN"] = "milo"
+    try:
+        args.reply_to, args.body = "m1", "Hi Ada, Thursday at 10:00 works for the demo. Kind regards, Sam"
+        out = gm.cmd_draft("tok", args)
+    finally:
+        del os.environ["INTERNS_INTERN"]
+    entry = gm.load_ledger(args.mailbox_dir)[out["draft_id"]]
+    assert entry["intern"] == "milo" and entry["body"].startswith("Hi Ada") and entry["internet_message_id"], entry
+    assert gm.cmd_sent_drafts("tok", args)["sent"] == [], "still in Drafts: nothing yet"
+
+    # the owner edits and sends it: the draft leaves Drafts, a copy with the same Message-ID lands in Sent Items
+    fake.messages.pop(out["draft_id"])
+    fake.sent.append({"id": "s1", "internetMessageId": entry["internet_message_id"], "conversationId": "c1",
+                      "subject": "RE: ClinicFlow", "sentDateTime": "2099-01-01T09:00:00Z",
+                      "toRecipients": [{"emailAddress": {"address": "ada@willowbrook-vet.example"}}],
+                      "uniqueBody": {"content": "Hi Ada, Thursday 10:00 works.\n\nCheers, Sam"}})
+    got = gm.cmd_sent_drafts("tok", args)["sent"]
+    assert len(got) == 1, got
+    assert got[0]["intern"] == "milo" and got[0]["intern_body"].endswith("Kind regards, Sam")
+    assert got[0]["sent_body"] == "Hi Ada, Thursday 10:00 works.\n\nCheers, Sam"
+    assert got[0]["to"] == ["ada@willowbrook-vet.example"]
+    assert gm.cmd_sent_drafts("tok", args)["sent"] == [], "each draft is reported once"
+
+
+def t_sent_drafts_falls_back_to_the_conversation_and_gives_up_on_deleted_drafts():
+    fake, args = fresh()
+    args.to, args.subject, args.body = "ada@willowbrook-vet.example", "Demo", "Hello Ada, a new note."
+    out = gm.cmd_draft("tok", args)
+    fake.messages.pop(out["draft_id"])
+    fake.sent.append({"id": "s2", "internetMessageId": "<rewritten@client>", "conversationId": out["conversation_id"],
+                      "subject": "Demo", "sentDateTime": "2099-01-01T09:00:00Z", "toRecipients": [],
+                      "uniqueBody": {"content": "Hi Ada, short note."}})
+    got = gm.cmd_sent_drafts("tok", args)["sent"]
+    assert [g["sent_body"] for g in got] == ["Hi Ada, short note."], got
+
+    # deleted unsent, a week ago: dropped quietly
+    args.body = "Never sent."
+    gone = gm.cmd_draft("tok", args)
+    fake.messages.pop(gone["draft_id"])
+    ledger = gm.load_ledger(args.mailbox_dir)
+    ledger[gone["draft_id"]]["created_at"] = "2000-01-01T00:00:00Z"
+    gm.save_ledger(args.mailbox_dir, ledger)
+    assert gm.cmd_sent_drafts("tok", args)["sent"] == []
+    ledger = gm.load_ledger(args.mailbox_dir)
+    assert "harvest" not in ledger[gone["draft_id"]], "older than the lookback: left alone"
+    from datetime import datetime, timedelta, timezone
+    ledger[gone["draft_id"]]["created_at"] = (datetime.now(timezone.utc) - timedelta(days=8)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    gm.save_ledger(args.mailbox_dir, ledger)
+    gm.cmd_sent_drafts("tok", args)
+    assert gm.load_ledger(args.mailbox_dir)[gone["draft_id"]]["harvest"] == "gone"
 
 
 def t_pure_helpers():

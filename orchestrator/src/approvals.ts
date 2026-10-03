@@ -2,6 +2,7 @@
 import type { CapabilityService } from "./capabilities.js";
 import type { Db } from "./db.js";
 import type { GithubClient, GithubReviewProposal } from "./github.js";
+import { applyDraftLearnAnswer } from "./draftlearn.js";
 import { applyQuieterAnswer } from "./notify.js";
 import type { Registry } from "./registry.js";
 import { RetryableApprovalError } from "./errors.js";
@@ -25,6 +26,7 @@ export class ApprovalService {
     if (actionId === "reject") this.capabilities.rejectForCard(card.id);
     if (card.context.kind === "budget" && actionId === "extend") return this.extendBudget(card, resolution);
     if (card.context.kind === "notify_suggest" && this.registry) applyQuieterAnswer(this.db, this.registry, card, actionId);
+    if (card.context.kind === "draft_learn") applyDraftLearnAnswer(this.db, card, actionId);
     const job = this.db.getApprovalJob(card.id, action.id);
     if (!job) return this.db.resolveCard(card.id, resolution)!;
     if (job.status === "done") return this.db.resolveCard(card.id, resolution)!;

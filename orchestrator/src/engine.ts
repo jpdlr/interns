@@ -255,7 +255,9 @@ export class SdkEngine implements Engine {
       ...(this.config.engine.model ? { model: this.config.engine.model } : {}),
       ...(opts.abort ? { abortController: opts.abort } : {}),
       // graph-mail / graph-cal only see the mailboxes this intern may use (mailboxes.ts)
-      ...(manifest.mailboxes ? { env: { ...process.env, ...mailboxEnv(manifest, this.config) } } : {}),
+      // graph-mail/graph-cal see only this intern's mailboxes (mailboxes.ts), and graph-mail
+      // records which intern wrote each draft (learning from the owner's edits, draftlearn.ts)
+      env: { ...process.env, INTERNS_INTERN: slug, ...mailboxEnv(manifest, this.config) },
     };
 
     const prevSession = opts.freshSession ? null : this.db.getSessionId(slug);

@@ -62,6 +62,19 @@ export interface PushLogEntry {
   opened_at: string | null;
 }
 
+export interface DraftEdit {
+  id: string;
+  intern: string;
+  mailbox: string;
+  draft_id: string;
+  subject: string;
+  original: string;
+  sent: string;
+  sent_at: string | null;
+  created_at: string;
+  learned_at: string | null;
+}
+
 /** Task error that marks work set aside at the daily token limit (status paused). */
 export const OVER_BUDGET = "over daily budget";
 
@@ -364,6 +377,25 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS idx_push_log_intern ON push_log(intern, ts);
   CREATE INDEX IF NOT EXISTS idx_push_log_pending ON push_log(delivery, summary_id);
+  `,
+  // Learning from the owner's draft edits (draftlearn.ts): what an intern
+  // drafted next to what was actually sent, until a pattern becomes a
+  // suggested standing order.
+  `
+  CREATE TABLE IF NOT EXISTS draft_edits (
+    id TEXT PRIMARY KEY,
+    intern TEXT NOT NULL,
+    mailbox TEXT NOT NULL,
+    draft_id TEXT NOT NULL,
+    subject TEXT NOT NULL DEFAULT '',
+    original TEXT NOT NULL,
+    sent TEXT NOT NULL,
+    sent_at TEXT,
+    created_at TEXT NOT NULL,
+    learned_at TEXT,
+    UNIQUE (mailbox, draft_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_draft_edits_intern ON draft_edits(intern, learned_at);
   `,
 ];
 
@@ -1648,6 +1680,38 @@ export class Db {
       )
       .get(intern, sinceIso) as { now: number | null; opened: number | null; summary: number | null; off: number | null };
     return { now: row.now ?? 0, opened: row.opened ?? 0, summary: row.summary ?? 0, off: row.off ?? 0 };
+  }
+
+  // ------------------------------------------------------ draft edits
+
+  /** Record one edited draft; false when this draft was already recorded. */
+  addDraftEdit(e: { intern: string; mailbox: string; draft_id: string; subject: string; original: string; sent: string; sent_at: string | null }): boolean {
+    const r = this.sqlite
+      .prepare(
+        `INSERT OR IGNORE INTO draft_edits (id, intern, mailbox, draft_id, subject, original, sent, sent_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(randomUUID(), e.intern, e.mailbox, e.draft_id, e.subject, e.original, e.sent, e.sent_at, nowIso());
+    return r.changes > 0;
+  }
+
+  /** Edits not yet looked at for a pattern, oldest first. */
+  unlearnedDraftEdits(intern: string): DraftEdit[] {
+    return this.sqlite.prepare("SELECT * FROM draft_edits WHERE intern = ? AND learned_at IS NULL ORDER BY created_at ASC").all(intern) as DraftEdit[];
+  }
+
+  internsWithUnlearnedEdits(): string[] {
+    return (this.sqlite.prepare("SELECT DISTINCT intern FROM draft_edits WHERE learned_at IS NULL").all() as { intern: string }[]).map((r) => r.intern);
+  }
+
+  markDraftEditsLearned(ids: string[]): void {
+    const stmt = this.sqlite.prepare("UPDATE draft_edits SET learned_at = ? WHERE id = ?");
+    const now = nowIso();
+    this.sqlite.transaction(() => ids.forEach((id) => stmt.run(now, id)))();
+  }
+
+  countDraftEdits(intern: string, sinceIso: string): number {
+    return (this.sqlite.prepare("SELECT COUNT(*) AS n FROM draft_edits WHERE intern = ? AND created_at >= ?").get(intern, sinceIso) as { n: number }).n;
   }
 
   // ------------------------------------------------------------------ kv

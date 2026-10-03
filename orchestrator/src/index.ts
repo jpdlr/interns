@@ -16,6 +16,7 @@ import { MeetingWatcher } from "./meetingwatch.js";
 import { Orchestrator } from "./orchestrator.js";
 import { PushService, wirePushNotifications } from "./push.js";
 import { ConnectorService } from "./connectors.js";
+import { DraftLearner } from "./draftlearn.js";
 import { localZone, setProfile } from "./profile.js";
 import { migrateSchedules } from "./schedules.js";
 import { Registry } from "./registry.js";
@@ -88,6 +89,9 @@ async function main(): Promise<void> {
     connectors,
   });
   const notifier = wirePushNotifications(bus, registry, push, db);
+  // learn from the owner's draft edits: sent drafts are compared every half hour (draftlearn.ts)
+  const draftLearner = new DraftLearner(db, registry, config, { home });
+  setInterval(() => void draftLearner.tick().catch((err) => console.error("[draftlearn] tick failed:", err)), 30 * 60_000);
   // summaries at JP's summary times / when quiet hours end; daily "you never open these" check
   setInterval(() => void notifier.tick().catch((err) => console.error("[notify] tick failed:", err)), 20_000);
   orchestrator.start();
