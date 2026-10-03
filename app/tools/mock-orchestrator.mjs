@@ -520,6 +520,7 @@ const server = http.createServer((req, res) => {
       "content-disposition": `${download ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(hit.meta.name)}` });
     return res.end(hit.bytes);
   }
+  if (req.method === "GET" && url.searchParams.get("sig") && features.serveMedia(path, res, cors)) return;
   if (req.headers.authorization !== `Bearer ${TOKEN}`) {
     res.writeHead(401, { ...cors, "content-type": "application/json" });
     return res.end(JSON.stringify({ error: "unauthorized" }));

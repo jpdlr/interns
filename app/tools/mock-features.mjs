@@ -47,6 +47,23 @@ export function installFeatures({ messages, cards, interns, emit, iso }) {
       ],
     },
   });
+  // A moodboard (orchestrator pagemedia.ts): images as SVG gradients standing in for photos.
+  const swatch = (a, b, label) =>
+    "data:image/svg+xml;base64," +
+    Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 500"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="400" height="500" fill="url(#g)"/><text x="24" y="470" font-family="sans-serif" font-size="28" fill="white" opacity="0.85">${label}</text></svg>`).toString("base64");
+  page({
+    id: "pg_refs", intern: "milo", kind: "moodboard", title: "References — reels you sent", summary: "6 references · diving, travel, watches", version: 2,
+    data: {
+      items: [
+        { id: "r1", url: "https://www.instagram.com/reel/demo1/", title: "oceanholic", source: "Ocean Diver", note: "Definition-style caption over footage, no voiceover. Works with a GoPro and no editing.", tags: ["diving"], image: "media:r1.jpg", image_url: swatch("#0b3d6b", "#1fa2c9", "oceanholic") },
+        { id: "r2", url: "https://www.instagram.com/p/demo2/", title: "Field watch on the trail", source: "Northwind Outfitters", note: "Wrist shot in hard light; the watch is the anchor, the place is the story.", tags: ["watches"], image: "media:r2.jpg", image_url: swatch("#3b3a2e", "#b08d57", "field watch") },
+        { id: "r3", url: "https://www.instagram.com/reel/demo3/", title: "Coastline, one song", source: "A Couple of Journeys", note: "Local-pride travel reel. Take the cut, not the voice.", tags: ["travel"], image: "media:r3.jpg", image_url: swatch("#e07a5f", "#3d405b", "coastline") },
+        { id: "r4", title: "Desk at golden hour", note: "Pasted from your photos.", by: "owner", tags: [], image: "media:r4.jpg", image_url: swatch("#f2cc8f", "#81b29a", "desk") },
+        { id: "r5", url: "https://www.instagram.com/p/demo5/", title: "peak.", source: "Office Ping Pong", note: "One word doing all the work.", tags: ["humour"], image: "media:r5.jpg", image_url: swatch("#22223b", "#9a8c98", "peak.") },
+        { id: "r6", url: "https://example.com/article", title: "How to shoot underwater with a GoPro", source: "example.com", tags: ["diving"], preview: "none" },
+      ],
+    },
+  });
   page({
     id: "pg_events", intern: "nia", kind: "table", title: "Events, Oct–Dec", summary: "6 events · 1 you said yes to", version: 3,
     data: {
@@ -151,6 +168,8 @@ export function installFeatures({ messages, cards, interns, emit, iso }) {
     });
   });
 
+  /** pasted moodboard images */
+  const mediaStore = new Map();
   const bump = (p) => {
     p.version += 1;
     p.updated_at = new Date().toISOString();
@@ -211,6 +230,42 @@ export function installFeatures({ messages, cards, interns, emit, iso }) {
         }
       }
       json(200, { hits: hits.slice(0, 30) });
+      return true;
+    }
+    if ((m = /^\/pages\/([^/]+)\/media$/.exec(path)) && req.method === "POST") {
+      const chunks = [];
+      req.on("data", (c) => chunks.push(c));
+      req.on("end", () => {
+        const name = `${Date.now().toString(36)}abcdef.png`;
+        mediaStore.set(name, { bytes: Buffer.concat(chunks), type: req.headers["content-type"] ?? "image/png" });
+        json(201, { image: `media:${name}`, url: `/pages/${m[1]}/media/${name}?sig=mock` });
+      });
+      return true;
+    }
+    if ((m = /^\/pages\/([^/]+)\/media\/([^/]+)$/.exec(path)) && req.method === "GET") {
+      const media = mediaStore.get(m[2]);
+      if (!media) return json(404, { error: "no such image" }), true;
+      res.writeHead(200, { "Content-Type": media.type, "Access-Control-Allow-Origin": "*" });
+      res.end(media.bytes);
+      return true;
+    }
+    if ((m = /^\/pages\/([^/]+)\/items$/.exec(path)) && req.method === "POST") {
+      void readBody(req).then(({ item = {} }) => {
+        const p = pages.get(m[1]);
+        if (!p) return json(404, { error: "no such page" });
+        const view = { tags: [], ...item };
+        if (typeof view.image === "string" && view.image.startsWith("media:")) view.image_url = `/pages/${p.id}/media/${view.image.slice(6)}?sig=mock`;
+        p.data.items.push(view);
+        bump(p);
+        json(200, p);
+        // a link gets its preview a moment later, like the real orchestrator
+        if (view.url && !view.image) {
+          setTimeout(() => {
+            Object.assign(view, { image: "media:preview.jpg", image_url: swatch("#264653", "#2a9d8f", "preview"), title: view.title ?? "Shared reel", source: view.source ?? "Instagram" });
+            bump(p);
+          }, 1500);
+        }
+      });
       return true;
     }
     if ((m = /^\/pages\/([^/]+)$/.exec(path)) && req.method === "GET") {
@@ -333,5 +388,15 @@ export function installFeatures({ messages, cards, interns, emit, iso }) {
     return false;
   }
 
-  return { handle, intercept, internName };
+  /** <img src> for a moodboard image: signed, no bearer (like attachments). */
+  function serveMedia(path, res, cors) {
+    const m = /^\/pages\/[^/]+\/media\/([^/]+)$/.exec(path);
+    const media = m && mediaStore.get(m[1]);
+    if (!media) return false;
+    res.writeHead(200, { ...cors, "Content-Type": media.type });
+    res.end(media.bytes);
+    return true;
+  }
+
+  return { handle, intercept, internName, serveMedia };
 }

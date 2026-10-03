@@ -6,6 +6,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Moodboards: a page of image cards.** Paste a link or an image into the board (or tap +
+  to add photos) and it lands as a card; links get their preview image fetched and kept, with
+  the post's caption and account (Instagram's image links expire, so a copy is stored with the
+  page). Interns make them with `intern-page create --kind moodboard`, and `image_path` puts a
+  local image (a shared photo, a downloaded post) on the board. Tap a card for the full image,
+  the link and the note.
 - **Google Photos connector.** Share albums or photos with the crew through Google's own picker
   (Google no longer lets apps read a whole library). Picked photos are copied to your server
   (`$INTERNS_HOME/photos`), so interns with the new `photos` tool can browse them any time:
@@ -58,6 +64,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
   has no post, comment or message command.
 
 ### Fixed
+- **Table pages no longer lose their rows.** A table written with `items` (as every other page
+  kind calls its list) or columns with `label` saved empty, because unknown fields were dropped
+  silently. Both are accepted now, and an empty table says so.
 - **The attach button opens on iPhone again, and is now a +.** It acted on touchstart (to keep
   the keyboard up), which iOS doesn't count as a tap for opening the file picker, so nothing
   happened. It now acts on touchend, still keeping the keyboard up.

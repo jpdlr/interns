@@ -434,6 +434,30 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS idx_style_changes_intern ON style_changes(intern, created_at);
   `,
+  // Moodboard pages (pagemedia.ts): SQLite can't widen a CHECK, so the pages
+  // table is rebuilt with the new kind. Nothing references it.
+  `
+  CREATE TABLE pages_next (
+    id TEXT PRIMARY KEY,
+    intern TEXT NOT NULL,
+    thread_key TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('people','board','table','list','draft','moodboard')),
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    data TEXT NOT NULL DEFAULT '{}',
+    version INTEGER NOT NULL DEFAULT 1,
+    pinned INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    archived_at TEXT
+  );
+  INSERT INTO pages_next (id, intern, thread_key, kind, title, summary, data, version, pinned, created_at, updated_at, archived_at)
+    SELECT id, intern, thread_key, kind, title, summary, data, version, pinned, created_at, updated_at, archived_at FROM pages;
+  DROP TABLE pages;
+  ALTER TABLE pages_next RENAME TO pages;
+  CREATE INDEX IF NOT EXISTS idx_pages_intern ON pages(intern, updated_at);
+  CREATE INDEX IF NOT EXISTS idx_pages_thread ON pages(thread_key, updated_at);
+  `,
 ];
 
 interface PageRow {

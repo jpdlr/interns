@@ -55,4 +55,5 @@ export const PAGE_KIND_LABEL: Record<string, string> = {
   table: "Table",
   list: "List",
   draft: "Email draft",
+  moodboard: "Moodboard",
 };
