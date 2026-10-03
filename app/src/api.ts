@@ -1249,6 +1249,11 @@ export class InternsApi {
     let controller: AbortController | null = null;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    /** when the stream last delivered anything (the server pings every 25s) */
+    let lastByte = 0;
+    let streaming = false;
+    let connectedBefore = false;
+    let stalled = false;
 
     const status = (next: StreamStatus, detail?: string) => {
       if (!closed) handlers.onStatus?.(next, detail);
@@ -1306,12 +1311,19 @@ export class InternsApi {
         attempt = 0;
         stop(); // cancel the polling tick — the real stream is up
         status("live");
+        // Back after a drop: whatever happened meanwhile was never streamed.
+        if (connectedBefore) handlers.onEvent({ type: "poll" });
+        connectedBefore = true;
+        streaming = true;
+        stalled = false;
+        lastByte = Date.now();
         const reader = body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
         for (;;) {
           const { value, done } = await reader.read();
           if (done || closed) break;
+          lastByte = Date.now();
           buffer += decoder.decode(value, { stream: true });
           // SSE frames are separated by a blank line.
           let split: number;
@@ -1324,7 +1336,15 @@ export class InternsApi {
         }
         throw new Error("stream ended");
       } catch (error) {
+        streaming = false;
         if (closed) return;
+        if (stalled) {
+          // Went quiet without an error (a suspended phone, a proxy dropping
+          // an idle connection): reconnect straight away, not as a failure.
+          stalled = false;
+          void connect(true);
+          return;
+        }
         if (error instanceof ApiError && error.isAuth) {
           stop();
           status("offline", "Unauthorized — check the API token in Settings.");
@@ -1354,11 +1374,39 @@ export class InternsApi {
       }
     };
 
+    /** Drop a stream that has gone silent; the reconnect refetches. */
+    const restartIfQuiet = (quietMs: number) => {
+      if (closed || !streaming || Date.now() - lastByte < quietMs) return;
+      stalled = true;
+      controller?.abort();
+    };
+    const watchdog = setInterval(() => restartIfQuiet(STREAM_SILENCE_MS), 10_000);
+    // Coming back to the app (or back online): catch up now, and don't trust
+    // a stream that may have died while the phone slept.
+    const resume = () => {
+      if (closed) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      handlers.onEvent({ type: "poll" });
+      restartIfQuiet(RESUME_QUIET_MS);
+    };
+    const canListen = typeof window !== "undefined" && typeof window.addEventListener === "function" && typeof document !== "undefined";
+    if (canListen) {
+      document.addEventListener("visibilitychange", resume);
+      window.addEventListener("pageshow", resume);
+      window.addEventListener("online", resume);
+    }
+
     if (typeof fetch === "undefined") startPolling("This runtime has no fetch.");
     else void connect();
 
     return () => {
       closed = true;
+      clearInterval(watchdog);
+      if (canListen) {
+        document.removeEventListener("visibilitychange", resume);
+        window.removeEventListener("pageshow", resume);
+        window.removeEventListener("online", resume);
+      }
       controller?.abort();
       stop();
     };
@@ -1373,6 +1421,10 @@ const MAX_BACKOFF_MS = 15_000;
 /** Two quick failures is enough to conclude the stream is not coming back. */
 const STREAM_ATTEMPTS_BEFORE_POLLING = 2;
 const STREAM_RETRY_WHILE_POLLING_MS = 60_000;
+/** The server pings every 25s; this long without a byte means the stream is dead. */
+const STREAM_SILENCE_MS = 60_000;
+/** On returning to the app, a stream quiet this long is replaced rather than trusted. */
+const RESUME_QUIET_MS = 30_000;
 
 /**
  * A cross-origin fetch blocked by missing CORS headers rejects with an opaque

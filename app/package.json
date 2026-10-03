@@ -35,7 +35,8 @@
     "mock": "node tools/mock-orchestrator.mjs",
     "serve:dist": "node tools/serve-dist.mjs dist 7812",
     "check:pwa": "node tools/pwa-check.mjs",
-    "check:schedule": "../orchestrator/node_modules/.bin/tsx tools/schedule-check.ts"
+    "check:schedule": "../orchestrator/node_modules/.bin/tsx tools/schedule-check.ts",
+    "check:stream": "../orchestrator/node_modules/.bin/tsx tools/stream-check.ts"
   },
   "private": true,
   "license": "MIT"

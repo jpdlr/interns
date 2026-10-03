@@ -47,5 +47,7 @@ jobs:
         working-directory: app
       - run: npm run check:schedule
         working-directory: app
+      - run: npm run check:stream
+        working-directory: app
       - run: npm run export:web
         working-directory: app

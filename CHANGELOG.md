@@ -44,6 +44,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
   has no post, comment or message command.
 
 ### Fixed
+- **New messages show up without leaving the chat.** A live stream that died quietly (a phone
+  that slept, a dropped connection) kept saying "live" and delivered nothing. The app now
+  replaces a stream that has been silent for a minute, catches up after every reconnect, and
+  refetches the moment you come back to it. `npm run check:stream` covers this.
 - Brand logos with gradients (Outlook, Instagram, Office) no longer paint blank when the
   same logo is also on a screen underneath.
 
