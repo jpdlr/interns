@@ -10,6 +10,12 @@
   <img alt="Self-hosted" src="https://img.shields.io/badge/self--hosted-single%20user-0b0d12">
 </p>
 
+<p align="center">
+  <a href="docs/media/interns-promo.mp4"><img src="docs/images/demo.gif" alt="A 28-second demo of Interns: hire an intern in one sentence, see what the crew did on Today, ask for a chart, approve a draft" width="100%"></a>
+  <br>
+  <sub>▶ <a href="docs/media/interns-promo.mp4"><b>Watch the 28-second demo</b></a> in full quality</sub>
+</p>
+
 **Interns** is a self-hosted crew of persistent AI agents. Each intern has a name, an
 animated face, a job, its own memory, its own tools and a daily budget. You talk to them
 from a phone app or from Discord. They also work on their own: they triage your inbox,
