@@ -16,6 +16,7 @@
  * them to the summary — and, if he likes, to tell them to message less.
  */
 import { plainText } from "./notifytext.js";
+import { localZone, ownerName } from "./profile.js";
 import { inQuietHours } from "./rules.js";
 import type { Db, PushDelivery, PushLogEntry } from "./db.js";
 import type { Registry } from "./registry.js";
@@ -82,9 +83,9 @@ export function levelOf(registry: Registry, slug: string): NotifyLevel {
   return registry.get(slug)?.notify ?? "needs_you";
 }
 
-/** "HH:MM" on JP's clock. */
+/** "HH:MM" on the owner's clock. */
 export function localHhmm(now: Date): string {
-  return new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Johannesburg", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(now);
+  return new Intl.DateTimeFormat("en-GB", { timeZone: localZone(), hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(now);
 }
 
 export function globalQuiet(settings: NotifySettings, now: Date): boolean {
@@ -114,8 +115,8 @@ const SUGGEST_MAX_OPEN_RATE = 0.2;
 const SUGGEST_SNOOZE_DAYS = 30;
 
 /** The guidance a "ask them to message less" answer leaves with the intern. */
-export const MESSAGE_LESS_GUIDANCE =
-  "Only message JP unprompted when something needs his decision or can't wait. Everything else goes on your pages or into your next reply — he sees it in his summary.";
+export const messageLessGuidance = (owner = ownerName()) =>
+  `Only message ${owner} unprompted when something needs their decision or can't wait. Everything else goes on your pages or into your next reply — ${owner} sees it in the summary.`;
 
 /**
  * Interns JP keeps not opening: buzzed at least 6 times in two weeks and
@@ -161,7 +162,8 @@ export function applyQuieterAnswer(db: Db, registry: Registry, card: Card, actio
   const manifest = registry.get(slug);
   if (!manifest || (actionId !== "summary" && actionId !== "summary_teach")) return;
   registry.save({ ...manifest, notify: "summary" }, slug);
-  if (actionId === "summary_teach" && !db.listRules(slug).some((r) => r.text === MESSAGE_LESS_GUIDANCE && !r.removed_at)) {
-    db.createRule({ intern: slug, kind: "soft", type: "guidance", params: {}, text: MESSAGE_LESS_GUIDANCE });
+  const guidance = messageLessGuidance();
+  if (actionId === "summary_teach" && !db.listRules(slug).some((r) => r.text === guidance && !r.removed_at)) {
+    db.createRule({ intern: slug, kind: "soft", type: "guidance", params: {}, text: guidance });
   }
 }

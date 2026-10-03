@@ -20,6 +20,7 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), "interns-features-"));
 process.env.INTERNS_HOME = home;
 
 const { loadConfig } = await import("../src/config.js");
+const { setProfile } = await import("../src/profile.js");
 const { EventBus } = await import("../src/events.js");
 const { Db } = await import("../src/db.js");
 const { Registry } = await import("../src/registry.js");
@@ -762,9 +763,9 @@ try {
     assert.equal((await api("/interns/tessa/manifest")).body.notify, "needs_you", "the default");
     db.addMessage({ intern: "tessa", author: "intern", speaker: "tessa", text: "Pipeline updated overnight.", surface: "system", cause: "work" });
     db.addMessage({ intern: "rhea", author: "intern", speaker: "rhea", text: "Done — the PR is approved.", surface: "system", cause: "reply" });
-    db.createCard({ intern: "tessa", title: "Send the BioAxis reply?", body: "Draft is ready.", severity: "action", actions: [{ id: "ok", label: "OK", style: "primary", kind: "button" }] });
+    db.createCard({ intern: "tessa", title: "Send the Side Project reply?", body: "Draft is ready.", severity: "action", actions: [{ id: "ok", label: "OK", style: "primary", kind: "button" }] });
     db.createCard({ intern: "ingrid", title: "Three new expos listed", body: "FYI", severity: "info" });
-    assert.deepEqual(sent.map((p) => p.title), ["Rhea", "Tessa: Send the BioAxis reply?"]);
+    assert.deepEqual(sent.map((p) => p.title), ["Rhea", "Tessa: Send the Side Project reply?"]);
     assert.ok(sent.every((p) => p.push_id), "every buzz carries its log id");
 
     // everything / nothing
@@ -802,6 +803,7 @@ try {
   });
 
   await check("notifications: the summary goes out at summary times and when quiet hours end — not with \"Never\"", async () => {
+    setProfile({ owner_name: "Boss", timezone: "Africa/Johannesburg" }); // the times below are SAST
     const sent: { title: string }[] = [];
     const notifier = wirePushNotifications(bus, registry, { notify: async (p) => (sent.push(p), {} as never) }, db);
     notifyRules.setNotifySettings(db, { summary_times: ["12:30"], quiet: { enabled: true, from: "22:00", to: "07:00" } });
@@ -821,6 +823,7 @@ try {
     await notifier.tick(new Date("2026-10-07T05:00:00Z"));
     assert.equal(sent.length, 2, "never: held updates wait in the app");
     notifyRules.setNotifySettings(db, { summary_times: ["12:30", "17:30"] });
+    setProfile({ owner_name: "Boss", timezone: "" });
   });
 
   await check("notifications: never opened → suggest the summary, and teach them to message less", async () => {
@@ -838,7 +841,7 @@ try {
     const res = await api(`/cards/${cards[0]!.id}/actions/summary_teach`, { method: "POST", body: {} });
     assert.equal(res.status, 200, JSON.stringify(res.body));
     assert.equal(registry.get("julia-x")!.notify, "summary");
-    assert.ok(db.listRules("julia-x").some((r) => r.text === notifyRules.MESSAGE_LESS_GUIDANCE), "she is told to message less");
+    assert.ok(db.listRules("julia-x").some((r) => r.text === notifyRules.messageLessGuidance()), "she is told to message less");
   });
 
   await check("notifications: settings", async () => {
