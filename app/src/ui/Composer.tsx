@@ -20,7 +20,7 @@ import {
 import type { UploadableFile } from "../api";
 import { radius, scaledFont, space, useAppTheme } from "../theme";
 import { filesFromDataTransfer } from "./Attachments";
-import { BulbIcon, PaperclipIcon, SendIcon } from "./Icons";
+import { BulbIcon, PlusIcon, SendIcon } from "./Icons";
 
 /** Matches the send button, so one line of text sits on the same baseline. */
 export const COMPOSER_MIN_HEIGHT = 44;
@@ -36,7 +36,7 @@ export interface ComposerProps {
   placeholder?: string;
   onFocus?: () => void;
   onBlur?: () => void;
-  /** paperclip tap; omitted = no attach button */
+  /** the + button: attach a file or photo; omitted = no button */
   onAttach?: () => void;
   /** files pasted into or dropped on the field (web) */
   onFiles?: (files: UploadableFile[]) => void;
@@ -77,28 +77,50 @@ export function Composer({
   // only closed the keyboard. Preventing the default on mouse/touch-down keeps
   // focus in the field. On touch devices that also suppresses the synthesized
   // click, so the action is fired straight from the touch instead.
+  //
+  // Attach fires on touchend, not touchstart: it opens the file picker, and
+  // iOS only lets a page open one from a real tap (touchend counts,
+  // touchstart doesn't), so on touchstart the picker silently never opened.
   const latest = useRef({ onSend, onAttach, canSend: false });
   useEffect(() => {
     if (Platform.OS !== "web") return;
-    const bind = (ref: React.RefObject<View | null>, fire: () => void) => {
+    const bind = (ref: React.RefObject<View | null>, fire: () => void, on: "touchstart" | "touchend") => {
       const node = ref.current as unknown as HTMLElement | null;
       if (!node?.addEventListener) return () => {};
+      let start: { x: number; y: number } | null = null;
       const onMouseDown = (e: Event) => e.preventDefault(); // desktop: keep focus, let the click fire
-      const onTouchStart = (e: Event) => {
+      const onTouchStart = (e: TouchEvent) => {
+        const t = e.touches[0];
+        start = t ? { x: t.clientX, y: t.clientY } : null;
+        if (on !== "touchstart") return;
         e.preventDefault(); // mobile: keep focus + keyboard; no click will follow, so act now
+        fire();
+      };
+      const onTouchEnd = (e: TouchEvent) => {
+        if (on !== "touchend") return;
+        const t = e.changedTouches[0];
+        // a finger that slid (scrolling past the button) isn't a tap
+        if (start && t && Math.hypot(t.clientX - start.x, t.clientY - start.y) > 10) return;
+        e.preventDefault(); // no synthesized click, and the field keeps focus
         fire();
       };
       node.addEventListener("mousedown", onMouseDown);
       node.addEventListener("touchstart", onTouchStart, { passive: false });
+      node.addEventListener("touchend", onTouchEnd, { passive: false });
       return () => {
         node.removeEventListener("mousedown", onMouseDown);
         node.removeEventListener("touchstart", onTouchStart);
+        node.removeEventListener("touchend", onTouchEnd);
       };
     };
-    const offSend = bind(sendRef, () => {
-      if (latest.current.canSend) latest.current.onSend();
-    });
-    const offAttach = bind(attachRef, () => latest.current.onAttach?.());
+    const offSend = bind(
+      sendRef,
+      () => {
+        if (latest.current.canSend) latest.current.onSend();
+      },
+      "touchstart",
+    );
+    const offAttach = bind(attachRef, () => latest.current.onAttach?.(), "touchend");
     return () => {
       offSend();
       offAttach();
@@ -191,7 +213,7 @@ export function Composer({
           hitSlop={4}
           style={({ pressed }) => [styles.attach, { opacity: pressed ? 0.6 : 1 }]}
         >
-          <PaperclipIcon color={colors.textDim} size={20} />
+          <PlusIcon color={colors.text} size={22} />
         </Pressable>
       ) : null}
       {onToggleIdea ? (

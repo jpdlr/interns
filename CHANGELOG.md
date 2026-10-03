@@ -58,6 +58,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
   has no post, comment or message command.
 
 ### Fixed
+- **The attach button opens on iPhone again, and is now a +.** It acted on touchstart (to keep
+  the keyboard up), which iOS doesn't count as a tap for opening the file picker, so nothing
+  happened. It now acts on touchend, still keeping the keyboard up.
 - **No dark flash in light mode.** The app's first frame (the loading screen, before the
   JavaScript runs) was always dark. It now paints from CSS variables that follow your phone or
   your Light/Dark setting, applied before the first paint.
