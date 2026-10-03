@@ -1,0 +1,4 @@
+#!/bin/sh
+# Runs github.ts with the orchestrator's own tsx, wherever the repo is checked out.
+here=$(dirname "$(readlink -f "$0")")
+exec "$here/../node_modules/.bin/tsx" "$here/github.ts" "$@"

@@ -1,0 +1,200 @@
+#!/usr/bin/env node
+/**
+ * intern-card — raise an interactive card for JP (and check what he did with it).
+ *
+ * Cards are stateful backend objects: the orchestrator stores them and the
+ * Discord adapter renders each open card as an embed with buttons in the
+ * intern's channel, then resolves it when JP clicks. This CLI only creates
+ * cards and reads them back — it never resolves one on JP's behalf.
+ *
+ * Usage:
+ *   intern-card --intern tessa --title T --body B --severity action \
+ *     --actions '[{"id":"ignore","label":"Ignore","style":"success","kind":"button"}]'
+ *   intern-card resolve-info <card-id>
+ *
+ * All output is JSON on stdout; errors are {"error": "..."} with a nonzero exit.
+ * No dependencies beyond node builtins (extension-less file, so builtins are
+ * pulled via process.getBuiltinModule to stay CJS/ESM agnostic).
+ */
+const fs = process.getBuiltinModule("node:fs");
+const os = process.getBuiltinModule("node:os");
+const path = process.getBuiltinModule("node:path");
+
+const SEVERITIES = ["info", "action", "urgent"];
+const STYLES = ["primary", "success", "neutral"];
+const KINDS = ["button", "date", "text"];
+const MAX_ACTIONS = 5; // one Discord button row
+
+function out(obj) {
+  process.stdout.write(JSON.stringify(obj, null, 1) + "\n");
+}
+
+function die(msg, extra) {
+  out({ error: msg, ...(extra ? { detail: extra } : {}) });
+  process.exit(1);
+}
+
+function internsHome() {
+  return process.env.INTERNS_HOME || path.join(os.homedir(), ".interns");
+}
+
+function loadConfig() {
+  const file = path.join(internsHome(), "config.json");
+  if (!fs.existsSync(file)) die(`no orchestrator config at ${file}`);
+  let cfg;
+  try {
+    cfg = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (e) {
+    die(`cannot parse ${file}: ${e.message}`);
+  }
+  if (!cfg.api_token) die(`no api_token in ${file} — start the orchestrator once to generate it`);
+  return { token: cfg.api_token, port: cfg.port || 7810 };
+}
+
+async function api(method, route, body) {
+  const { token, port } = loadConfig();
+  const url = `http://127.0.0.1:${port}${route}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch (e) {
+    const cause = e && e.cause && e.cause.code ? ` (${e.cause.code})` : "";
+    die(`cannot reach the orchestrator API at ${url}${cause} — is it running?`);
+  }
+  const text = await res.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      die(`${method} ${route}: non-JSON response (HTTP ${res.status}): ${text.slice(0, 200)}`);
+    }
+  }
+  if (!res.ok) {
+    const why = data && data.error ? data.error : `HTTP ${res.status}`;
+    die(`${method} ${route}: ${why}`, data && data.detail ? data.detail : undefined);
+  }
+  return data;
+}
+
+/** --flag value / --flag=value / bare positionals */
+function parseArgs(argv) {
+  const flags = {};
+  const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg.startsWith("--")) {
+      const eq = arg.indexOf("=");
+      if (eq !== -1) {
+        flags[arg.slice(2, eq)] = arg.slice(eq + 1);
+      } else {
+        const next = argv[i + 1];
+        if (next === undefined || next.startsWith("--")) die(`flag ${arg} needs a value`);
+        flags[arg.slice(2)] = next;
+        i++;
+      }
+    } else {
+      positional.push(arg);
+    }
+  }
+  return { flags, positional };
+}
+
+function parseActions(raw) {
+  if (!raw) return [];
+  let actions;
+  try {
+    actions = JSON.parse(raw);
+  } catch (e) {
+    die(`--actions must be a JSON array: ${e.message}`);
+  }
+  if (!Array.isArray(actions)) die("--actions must be a JSON array");
+  if (actions.length > MAX_ACTIONS) die(`too many actions (${actions.length}), max ${MAX_ACTIONS}`);
+  const seen = new Set();
+  for (const a of actions) {
+    if (!a || typeof a !== "object") die("each action must be an object {id,label,style,kind}");
+    if (!a.id || !a.label) die("each action needs an id and a label");
+    if (seen.has(a.id)) die(`duplicate action id: ${a.id}`);
+    seen.add(a.id);
+    if (a.style && !STYLES.includes(a.style)) die(`bad action style: ${a.style} (${STYLES.join("|")})`);
+    if (a.kind && !KINDS.includes(a.kind)) die(`bad action kind: ${a.kind} (${KINDS.join("|")})`);
+  }
+  return actions;
+}
+
+async function cmdCreate(flags) {
+  const intern = flags.intern;
+  const title = flags.title;
+  const body = flags.body;
+  if (!intern) die("--intern is required");
+  if (!title) die("--title is required");
+  if (!body) die("--body is required (it becomes the card's markdown description)");
+  const severity = flags.severity || "info";
+  if (!SEVERITIES.includes(severity)) die(`bad --severity: ${severity} (${SEVERITIES.join("|")})`);
+  const card = await api("POST", "/cards", {
+    intern,
+    title,
+    body,
+    severity,
+    actions: parseActions(flags.actions),
+  });
+  return {
+    card_id: card.id,
+    intern: card.intern,
+    severity: card.severity,
+    state: card.state,
+    actions: card.actions.map((a) => a.id),
+    note: "raised for JP — check back later with: intern-card resolve-info <card_id>",
+  };
+}
+
+async function cmdResolveInfo(id) {
+  if (!id) die("usage: intern-card resolve-info <card-id>");
+  const card = await api("GET", `/cards/${encodeURIComponent(id)}`);
+  return {
+    card_id: card.id,
+    intern: card.intern,
+    title: card.title,
+    severity: card.severity,
+    state: card.state,
+    /** null while JP has not acted yet; otherwise the action id he clicked */
+    resolved_action: card.resolution ? card.resolution.action : null,
+    resolution: card.resolution,
+    created_at: card.created_at,
+    resolved_at: card.resolved_at,
+    snoozed_until: card.snoozed_until,
+    actions: card.actions.map((a) => ({ id: a.id, label: a.label })),
+  };
+}
+
+const USAGE = [
+  "intern-card --intern <slug> --title <T> --body <B> [--severity info|action|urgent]",
+  "            [--actions '[{\"id\":\"ignore\",\"label\":\"Ignore\",\"style\":\"success\",\"kind\":\"button\"}]']",
+  "intern-card resolve-info <card-id>",
+].join("\n");
+
+async function main() {
+  const argv = process.argv.slice(2);
+  if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
+    out({ usage: USAGE });
+    process.exit(argv.length === 0 ? 1 : 0);
+  }
+  const { flags, positional } = parseArgs(argv);
+  const cmd = positional[0] || "create";
+  if (cmd === "create") return cmdCreate(flags);
+  if (cmd === "resolve-info") return cmdResolveInfo(positional[1]);
+  die(`unknown command: ${cmd}`, USAGE);
+}
+
+main().then(
+  (result) => out(result),
+  (err) => die(err && err.message ? err.message : String(err)),
+);

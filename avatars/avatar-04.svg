@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<defs>
+<radialGradient id="halo" cx="50%" cy="50%" r="50%">
+<stop offset="0%" stop-color="#8b5cf6" stop-opacity=".5"/>
+<stop offset="100%" stop-color="#8b5cf6" stop-opacity="0"/>
+</radialGradient>
+<linearGradient id="f1" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0%" stop-color="#e6dcff"/>
+<stop offset="100%" stop-color="#7c4dff"/>
+</linearGradient>
+<linearGradient id="f2" x1="1" y1="0" x2="0" y2="1">
+<stop offset="0%" stop-color="#b79aff"/>
+<stop offset="100%" stop-color="#4020a0"/>
+</linearGradient>
+<linearGradient id="f3" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0%" stop-color="#9b7bff"/>
+<stop offset="100%" stop-color="#2a1470"/>
+</linearGradient>
+<filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+<feGaussianBlur stdDeviation="10"/>
+</filter>
+</defs>
+<g transform="translate(128 128)">
+<circle r="92" fill="url(#halo)">
+<animate attributeName="opacity" values=".6;1;.6" dur="8s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</circle>
+<polygon points="0,-80 40,-28 28,58 0,82 -28,58 -40,-28" fill="#7c4dff" opacity=".55" filter="url(#soft)"/>
+<g>
+<animateTransform attributeName="transform" type="rotate" values="-3;3;-3" dur="8s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+<polygon points="0,-80 40,-28 0,-8 -40,-28" fill="url(#f1)">
+<animate attributeName="opacity" values="1;.65;1" dur="8s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</polygon>
+<polygon points="40,-28 28,58 0,82 0,-8" fill="url(#f2)">
+<animate attributeName="opacity" values=".75;1;.75" dur="8s" begin="-2.6s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</polygon>
+<polygon points="-40,-28 0,-8 0,82 -28,58" fill="url(#f3)">
+<animate attributeName="opacity" values=".85;.6;.85" dur="8s" begin="-5.3s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</polygon>
+<polygon points="0,-52 12,-26 0,-14 -12,-26" fill="#f2ecff">
+<animate attributeName="opacity" values=".25;.9;.25" dur="4s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</polygon>
+</g>
+</g>
+</svg>

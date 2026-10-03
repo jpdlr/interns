@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<defs>
+<radialGradient id="halo" cx="50%" cy="50%" r="50%">
+<stop offset="0%" stop-color="#4ade80" stop-opacity=".4"/>
+<stop offset="100%" stop-color="#4ade80" stop-opacity="0"/>
+</radialGradient>
+<linearGradient id="body" x1="0" y1="0" x2=".4" y2="1">
+<stop offset="0%" stop-color="#e7ffd6"/>
+<stop offset="50%" stop-color="#4ade80"/>
+<stop offset="100%" stop-color="#14532d"/>
+</linearGradient>
+<linearGradient id="vein" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0%" stop-color="#f2ffe8" stop-opacity=".9"/>
+<stop offset="100%" stop-color="#bbf7c9" stop-opacity="0"/>
+</linearGradient>
+</defs>
+<g transform="translate(128 128)">
+<circle r="94" fill="url(#halo)">
+<animate attributeName="opacity" values=".65;1;.65" dur="7s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</circle>
+<g>
+<animateTransform attributeName="transform" type="rotate" values="-5;5;-5" dur="7s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+<path fill="url(#body)" d="M0,-74 C36,-42 42,22 0,74 C-42,22 -36,-42 0,-74 Z">
+<animate attributeName="d" dur="7s" repeatCount="indefinite" calcMode="spline"
+keyTimes="0;.5;1" keySplines=".42 0 .58 1;.42 0 .58 1"
+values="M0,-74 C36,-42 42,22 0,74 C-42,22 -36,-42 0,-74 Z;
+M2,-72 C42,-36 36,28 -2,72 C-36,26 -42,-38 2,-72 Z;
+M0,-74 C36,-42 42,22 0,74 C-42,22 -36,-42 0,-74 Z"/>
+</path>
+<path fill="url(#vein)" opacity=".8" d="M0,-58 C4,-30 4,28 0,56 C-4,28 -4,-30 0,-58 Z">
+<animate attributeName="opacity" values=".4;.9;.4" dur="7s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</path>
+</g>
+</g>
+</svg>

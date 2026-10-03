@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<defs>
+<radialGradient id="halo" cx="50%" cy="50%" r="50%">
+<stop offset="0%" stop-color="#3b82f6" stop-opacity=".45"/>
+<stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="body" cx="40%" cy="30%" r="80%">
+<stop offset="0%" stop-color="#bfdcff"/>
+<stop offset="50%" stop-color="#2563eb"/>
+<stop offset="100%" stop-color="#0a1c4d"/>
+</radialGradient>
+<linearGradient id="wave" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0%" stop-color="#9ecbff" stop-opacity=".95"/>
+<stop offset="100%" stop-color="#2b64d9" stop-opacity=".1"/>
+</linearGradient>
+<clipPath id="clip"><circle r="54"/></clipPath>
+</defs>
+<g transform="translate(128 128)">
+<circle r="96" fill="url(#halo)">
+<animate attributeName="opacity" values=".65;1;.65" dur="8s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</circle>
+<circle r="54" fill="url(#body)"/>
+<g clip-path="url(#clip)">
+<path fill="url(#wave)" d="M-150,-2 Q-135,-16 -120,-2 T-90,-2 T-60,-2 T-30,-2 T0,-2 T30,-2 T60,-2 T90,-2 T120,-2 T150,-2 L150,80 L-150,80 Z">
+<animateTransform attributeName="transform" type="translate" from="-60 0" to="0 0" dur="6s" repeatCount="indefinite"/>
+<animate attributeName="opacity" values=".7;1;.7" dur="8s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</path>
+<path fill="url(#wave)" opacity=".5" d="M-150,16 Q-135,4 -120,16 T-90,16 T-60,16 T-30,16 T0,16 T30,16 T60,16 T90,16 T120,16 T150,16 L150,80 L-150,80 Z">
+<animateTransform attributeName="transform" type="translate" from="0 0" to="-60 0" dur="8s" repeatCount="indefinite"/>
+</path>
+</g>
+<ellipse cx="-16" cy="-22" rx="20" ry="14" fill="#e4f1ff" opacity=".55">
+<animate attributeName="opacity" values=".3;.65;.3" dur="8s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</ellipse>
+</g>
+</svg>

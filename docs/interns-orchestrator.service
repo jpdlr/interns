@@ -1,0 +1,27 @@
+# Example systemd *user* unit for the Interns orchestrator.
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp docs/interns-orchestrator.service ~/.config/systemd/user/
+#   # edit WorkingDirectory to point at your checkout's orchestrator/ folder
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now interns-orchestrator
+#   loginctl enable-linger "$USER"   # keep it running when you're logged out
+#
+# Build first (cd orchestrator && npm ci && npm run build; cd ../app && npm ci
+# && npm run export:web). State and config live in ~/.interns; the API token
+# and other secrets stay in ~/.interns/config.json (mode 0600), never here.
+[Unit]
+Description=Interns orchestrator (Chaos Coordinator)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/interns/orchestrator
+ExecStart=/usr/bin/env node dist/src/index.js
+Restart=on-failure
+RestartSec=10
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target

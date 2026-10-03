@@ -1,0 +1,102 @@
+/**
+ * Entry point: wire config → db → registry → engine → discord → api →
+ * orchestrator loop, with graceful shutdown on SIGINT/SIGTERM.
+ */
+import { loadConfig, internsHome } from "./config.js";
+import { ApprovalService } from "./approvals.js";
+import { CapabilityService } from "./capabilities.js";
+import { Db } from "./db.js";
+import { DiscordAdapter } from "./discord.js";
+import { SdkEngine } from "./engine.js";
+import { EventBus } from "./events.js";
+import { GithubClient } from "./github.js";
+import { GithubWatcher } from "./githubwatch.js";
+import { MailWatcher } from "./mailwatch.js";
+import { MeetingWatcher } from "./meetingwatch.js";
+import { Orchestrator } from "./orchestrator.js";
+import { PushService, wirePushNotifications } from "./push.js";
+import { setProfile } from "./profile.js";
+import { Registry } from "./registry.js";
+import { wireSuggestionDecisions } from "./suggest.js";
+
+async function main(): Promise<void> {
+  const home = internsHome();
+  const config = loadConfig(home);
+  setProfile(config);
+  const bus = new EventBus();
+  const db = new Db(bus, home);
+  db.apiToken = config.api_token; // attachments carry HMAC-signed download URLs
+  const registry = new Registry(home);
+
+  // Mirror on-disk manifests into db identity rows (manifests are truth).
+  for (const { slug, manifest } of registry.list()) {
+    db.upsertIntern({ slug, name: manifest.name, role: manifest.role, icon: manifest.icon });
+  }
+
+  const engine = new SdkEngine(db, registry, config);
+  const capabilities = new CapabilityService(db, registry, config, home);
+  // Forge is a permanent systems role, not a per-integration specialist. It is
+  // created deterministically on first upgraded start and remains idle until
+  // the owner approves a capability build.
+  capabilities.ensureBuilder();
+  const github = new GithubClient(config.github);
+  const approvals = new ApprovalService(db, capabilities, github);
+  const githubwatch = new GithubWatcher(db, registry, config, github);
+  const discord = new DiscordAdapter(db, registry, bus, config, approvals, capabilities);
+  const mailwatch = new MailWatcher(db, registry, config, { home });
+  const meetingwatch = new MeetingWatcher(db, registry, config, { home });
+  const push = new PushService(db, config);
+  const orchestrator = new Orchestrator(db, registry, engine, config, mailwatch, discord, push);
+  orchestrator.suggestHome = home;
+  wireSuggestionDecisions(bus, home, capabilities);
+
+  await discord.start();
+  const api = await (await import("./api.js")).startApi({
+    db,
+    registry,
+    bus,
+    config,
+    discord,
+    push,
+    approvals,
+    capabilities,
+    github,
+    orchestrator,
+    home,
+  });
+  wirePushNotifications(bus, registry, push, db);
+  orchestrator.start();
+  mailwatch.start();
+  meetingwatch.start();
+  githubwatch.start();
+
+  console.log(
+    `[interns] up — home=${home} api=http://127.0.0.1:${config.port} ` +
+      `interns=${registry.list().length} discord=${config.discord.dry_run ? "dry_run" : "live"}`,
+  );
+
+  let shuttingDown = false;
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[interns] ${signal} — shutting down`);
+    await mailwatch.stop();
+    await meetingwatch.stop();
+    await githubwatch.stop();
+    await orchestrator.stop();
+    await discord.stop();
+    await api.close();
+    db.close();
+    process.exit(0);
+  };
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  // Safety nets: a stray rejection must never take the whole office down.
+  process.on("unhandledRejection", (err) => console.error("[interns] unhandled rejection:", err));
+  process.on("uncaughtException", (err) => console.error("[interns] uncaught exception:", err));
+}
+
+main().catch((err) => {
+  console.error("[interns] fatal:", err);
+  process.exit(1);
+});

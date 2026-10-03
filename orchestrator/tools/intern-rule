@@ -1,0 +1,195 @@
+#!/usr/bin/env node
+/**
+ * intern-rule — save a standing order JP gave you, so it sticks.
+ * See docs/features/04-standing-orders.md and contracts.md §3.
+ *
+ * Hard types are enforced by the orchestrator before work reaches you and
+ * cannot be forgotten — use one whenever the instruction fits:
+ *   mute_repo   --repo owner/name | name | owner/*        (PR reviews)
+ *   mute_sender --address a@b.c | --domain b.c            (mail)
+ *   quiet_hours --from 21:00 --to 07:00 [--tz Area/City]  (no lock-screen pings)
+ *   hold_until  --match "Maya" --until 2026-10-01         (mail/PRs/briefs mentioning it wait)
+ * Anything else is `guidance`: kept in your instructions on every run.
+ *
+ * The saved rule is shown under your reply with an Undo for JP.
+ *
+ * Usage:
+ *   intern-rule add --intern rhea --type mute_repo --repo northwind/webapp --text "Ignore all webapp PRs"
+ *   intern-rule add --intern tessa --type guidance --text "Write to Kettle Labs in Afrikaans"
+ *   intern-rule list --intern rhea
+ *   intern-rule disable <rule_id> | enable <rule_id> | remove <rule_id>
+ *
+ * All output is JSON on stdout; errors are {"error": "..."} with a nonzero exit.
+ */
+const fs = process.getBuiltinModule("node:fs");
+const os = process.getBuiltinModule("node:os");
+const path = process.getBuiltinModule("node:path");
+
+const TYPES = ["mute_repo", "mute_sender", "quiet_hours", "hold_until", "guidance"];
+const BOOLEAN_FLAGS = new Set([]);
+
+function out(obj) {
+  process.stdout.write(JSON.stringify(obj, null, 1) + "\n");
+}
+
+function die(msg, extra) {
+  out({ error: msg, ...(extra ? { detail: extra } : {}) });
+  process.exit(1);
+}
+
+function internsHome() {
+  return process.env.INTERNS_HOME || path.join(os.homedir(), ".interns");
+}
+
+function loadConfig() {
+  const file = path.join(internsHome(), "config.json");
+  if (!fs.existsSync(file)) die(`no orchestrator config at ${file}`);
+  let cfg;
+  try {
+    cfg = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (e) {
+    die(`cannot parse ${file}: ${e.message}`);
+  }
+  if (!cfg.api_token) die(`no api_token in ${file} — start the orchestrator once to generate it`);
+  return { token: cfg.api_token, port: cfg.port || 7810 };
+}
+
+async function api(method, route, body) {
+  const { token, port } = loadConfig();
+  const url = `http://127.0.0.1:${port}${route}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch (e) {
+    const cause = e && e.cause && e.cause.code ? ` (${e.cause.code})` : "";
+    die(`cannot reach the orchestrator API at ${url}${cause} — is it running?`);
+  }
+  const text = await res.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      die(`${method} ${route}: non-JSON response (HTTP ${res.status}): ${text.slice(0, 200)}`);
+    }
+  }
+  if (!res.ok) {
+    const why = data && data.error ? data.error : `HTTP ${res.status}`;
+    die(`${method} ${route}: ${why}`, data && data.detail ? data.detail : undefined);
+  }
+  return data;
+}
+
+/** --flag value / --flag=value / bare positionals */
+function parseArgs(argv) {
+  const flags = {};
+  const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg.startsWith("--")) {
+      const eq = arg.indexOf("=");
+      if (eq !== -1) {
+        flags[arg.slice(2, eq)] = arg.slice(eq + 1);
+      } else {
+        const next = argv[i + 1];
+        if (next === undefined || next.startsWith("--")) {
+          if (BOOLEAN_FLAGS.has(arg.slice(2))) flags[arg.slice(2)] = "true";
+          else die(`flag ${arg} needs a value`);
+        } else {
+          flags[arg.slice(2)] = next;
+          i++;
+        }
+      }
+    } else {
+      positional.push(arg);
+    }
+  }
+  return { flags, positional };
+}
+
+function paramsFor(type, flags) {
+  switch (type) {
+    case "mute_repo":
+      if (!flags.repo) die("mute_repo needs --repo owner/name (or a bare repo name, or owner/*)");
+      return { repo: flags.repo };
+    case "mute_sender":
+      if (!flags.address && !flags.domain) die("mute_sender needs --address a@b.c or --domain b.c");
+      return { ...(flags.address ? { address: flags.address } : {}), ...(flags.domain ? { domain: flags.domain } : {}) };
+    case "quiet_hours":
+      if (!flags.from || !flags.to) die("quiet_hours needs --from HH:MM --to HH:MM");
+      return { from: flags.from, to: flags.to, ...(flags.tz ? { tz: flags.tz } : {}) };
+    case "hold_until":
+      if (!flags.match || !flags.until) die("hold_until needs --match TEXT --until YYYY-MM-DD");
+      return { match: flags.match, until: flags.until };
+    default:
+      return {};
+  }
+}
+
+const brief = (r) => ({
+  rule_id: r.id,
+  type: r.type,
+  kind: r.kind,
+  text: r.text,
+  enabled: r.enabled,
+  hits: r.hits,
+  hits_7d: r.hits_7d,
+  ...(r.removed_at ? { removed_at: r.removed_at } : {}),
+});
+
+async function main() {
+  const argv = process.argv.slice(2);
+  if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
+    out({ usage: USAGE });
+    process.exit(argv.length === 0 ? 1 : 0);
+  }
+  const { flags, positional } = parseArgs(argv);
+  const [cmd, id] = positional;
+  switch (cmd) {
+    case "add": {
+      if (!flags.intern) die("--intern is required");
+      if (!TYPES.includes(flags.type)) die(`--type must be one of ${TYPES.join("|")}`);
+      if (!flags.text) die('--text is required: the order in one line, in JP\'s terms ("Ignore all webapp PRs")');
+      const rule = await api("POST", `/interns/${encodeURIComponent(flags.intern)}/rules`, {
+        type: flags.type,
+        text: flags.text,
+        params: paramsFor(flags.type, flags),
+      });
+      return { ...brief(rule), note: rule.kind === "hard" ? "saved — enforced before work reaches you" : "saved — added to your instructions from the next run" };
+    }
+    case "list": {
+      if (!flags.intern) die("--intern is required");
+      const res = await api("GET", `/interns/${encodeURIComponent(flags.intern)}/rules`);
+      return res.rules.map(brief);
+    }
+    case "enable":
+    case "disable":
+      if (!id) die(`usage: intern-rule ${cmd} <rule_id>`);
+      return brief(await api("PATCH", `/rules/${encodeURIComponent(id)}`, { enabled: cmd === "enable" }));
+    case "remove":
+      if (!id) die("usage: intern-rule remove <rule_id>");
+      return brief((await api("DELETE", `/rules/${encodeURIComponent(id)}`)).rule);
+    default:
+      die(`unknown command: ${cmd}`, USAGE);
+  }
+}
+
+const USAGE = [
+  "intern-rule add --intern <slug> --type mute_repo|mute_sender|quiet_hours|hold_until|guidance --text T [params]",
+  "  mute_repo --repo R · mute_sender --address A | --domain D · quiet_hours --from HH:MM --to HH:MM · hold_until --match M --until YYYY-MM-DD",
+  "intern-rule list --intern <slug>",
+  "intern-rule enable|disable|remove <rule_id>",
+].join("\n");
+
+main().then(
+  (result) => out(result),
+  (err) => die(err && err.message ? err.message : String(err)),
+);

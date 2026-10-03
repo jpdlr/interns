@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<defs>
+<radialGradient id="halo" cx="50%" cy="50%" r="50%">
+<stop offset="0%" stop-color="#c3ccda" stop-opacity=".4"/>
+<stop offset="100%" stop-color="#c3ccda" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="body" cx="38%" cy="32%" r="78%">
+<stop offset="0%" stop-color="#ffffff"/>
+<stop offset="50%" stop-color="#b9c2d0"/>
+<stop offset="100%" stop-color="#3f4652"/>
+</radialGradient>
+<radialGradient id="ring" cx="50%" cy="50%" r="50%">
+<stop offset="70%" stop-color="#dfe5ee" stop-opacity="0"/>
+<stop offset="88%" stop-color="#dfe5ee" stop-opacity=".8"/>
+<stop offset="100%" stop-color="#dfe5ee" stop-opacity="0"/>
+</radialGradient>
+</defs>
+<g transform="translate(128 128)">
+<circle r="96" fill="url(#halo)">
+<animate attributeName="opacity" values=".6;1;.6" dur="6s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</circle>
+<circle r="46" fill="url(#ring)" opacity="0">
+<animateTransform attributeName="transform" type="scale" values="1;2.05" dur="6s" repeatCount="indefinite" calcMode="spline" keySplines=".25 .1 .4 1"/>
+<animate attributeName="opacity" values=".75;0" dur="6s" repeatCount="indefinite" calcMode="spline" keySplines=".25 .1 .4 1"/>
+</circle>
+<circle r="46" fill="url(#ring)" opacity="0">
+<animateTransform attributeName="transform" type="scale" values="1;2.05" dur="6s" begin="-3s" repeatCount="indefinite" calcMode="spline" keySplines=".25 .1 .4 1"/>
+<animate attributeName="opacity" values=".75;0" dur="6s" begin="-3s" repeatCount="indefinite" calcMode="spline" keySplines=".25 .1 .4 1"/>
+</circle>
+<g>
+<animateTransform attributeName="transform" type="scale" values="1;1.04;1" dur="6s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+<circle r="42" fill="url(#body)"/>
+<ellipse cx="-12" cy="-15" rx="18" ry="14" fill="#ffffff" opacity=".6">
+<animate attributeName="opacity" values=".35;.75;.35" dur="6s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</ellipse>
+</g>
+</g>
+</svg>

@@ -1,0 +1,28 @@
+name: Bug report
+description: Something in the orchestrator or the app doesn't work as described
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Orchestrator output around the problem. Remove tokens, email addresses and anything private.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Commit hash (`git rev-parse --short HEAD`)
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where?
+      multiple: true
+      options: [App (PWA), Discord, Orchestrator / API, Outlook tools, GitHub reviews, Other]

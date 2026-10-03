@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<defs>
+<radialGradient id="halo" cx="50%" cy="50%" r="50%">
+<stop offset="0%" stop-color="#67e8f9" stop-opacity=".35"/>
+<stop offset="60%" stop-color="#e879f9" stop-opacity=".18"/>
+<stop offset="100%" stop-color="#e879f9" stop-opacity="0"/>
+</radialGradient>
+<linearGradient id="sheen" gradientUnits="userSpaceOnUse" x1="-76" y1="0" x2="76" y2="0">
+<stop offset="0%" stop-color="#22d3ee"/>
+<stop offset="50%" stop-color="#c9f6ff"/>
+<stop offset="100%" stop-color="#d946ef"/>
+<animateTransform attributeName="gradientTransform" type="rotate" from="0" to="360" dur="8s" repeatCount="indefinite"/>
+</linearGradient>
+<radialGradient id="orb" cx="42%" cy="36%" r="75%">
+<stop offset="0%" stop-color="#f6e5ff"/>
+<stop offset="50%" stop-color="#c26bf0"/>
+<stop offset="100%" stop-color="#3b1060"/>
+</radialGradient>
+</defs>
+<g transform="translate(128 128)">
+<circle r="100" fill="url(#halo)">
+<animate attributeName="opacity" values=".6;1;.6" dur="8s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</circle>
+<g transform="rotate(-16)">
+<g transform="scale(1 .42)">
+<path fill="url(#sheen)" fill-rule="evenodd" opacity=".9" d="M-76,0 A76,76 0 1,0 76,0 A76,76 0 1,0 -76,0 Z M-56,0 A56,56 0 1,1 56,0 A56,56 0 1,1 -56,0 Z"/>
+</g>
+</g>
+<g>
+<animateTransform attributeName="transform" type="scale" values="1;1.06;1" dur="8s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+<circle r="30" fill="url(#orb)"/>
+<circle cx="-8" cy="-9" r="9" fill="#fdf2ff" opacity=".7">
+<animate attributeName="opacity" values=".4;.85;.4" dur="8s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</circle>
+</g>
+<g transform="rotate(-16)">
+<g>
+<animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="8s" repeatCount="indefinite"/>
+<circle cx="66" cy="0" r="4.5" fill="#e0fbff" opacity=".95" transform="scale(1 .42)"/>
+</g>
+</g>
+</g>
+</svg>

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<defs>
+<radialGradient id="halo" cx="50%" cy="50%" r="50%">
+<stop offset="0%" stop-color="#b18cff" stop-opacity=".4"/>
+<stop offset="100%" stop-color="#b18cff" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="c1" cx="45%" cy="40%" r="60%">
+<stop offset="0%" stop-color="#efe4ff"/>
+<stop offset="60%" stop-color="#b18cff"/>
+<stop offset="100%" stop-color="#4c2f8f" stop-opacity=".2"/>
+</radialGradient>
+<radialGradient id="c2" cx="50%" cy="45%" r="60%">
+<stop offset="0%" stop-color="#d6beff"/>
+<stop offset="100%" stop-color="#6d48c4" stop-opacity=".15"/>
+</radialGradient>
+<filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+<feGaussianBlur stdDeviation="8"/>
+</filter>
+</defs>
+<g transform="translate(128 128)">
+<circle r="96" fill="url(#halo)">
+<animate attributeName="opacity" values=".65;1;.65" dur="9s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</circle>
+<ellipse cx="-24" cy="8" rx="44" ry="34" fill="url(#c2)" filter="url(#soft)" opacity=".8">
+<animateTransform attributeName="transform" type="translate" values="0 0;12 -8;0 0" dur="9s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</ellipse>
+<ellipse cx="26" cy="16" rx="40" ry="30" fill="url(#c2)" filter="url(#soft)" opacity=".7">
+<animateTransform attributeName="transform" type="translate" values="0 0;-10 6;0 0" dur="7s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</ellipse>
+<ellipse cx="0" cy="-14" rx="52" ry="38" fill="url(#c1)" filter="url(#soft)">
+<animateTransform attributeName="transform" type="translate" values="0 0;0 8;0 0" dur="8s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</ellipse>
+<circle cx="-6" cy="-16" r="15" fill="#f6efff" filter="url(#soft)">
+<animate attributeName="opacity" values=".5;.95;.5" dur="8s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</circle>
+</g>
+</svg>

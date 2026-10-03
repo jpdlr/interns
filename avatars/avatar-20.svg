@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<defs>
+<radialGradient id="halo" cx="50%" cy="50%" r="50%">
+<stop offset="0%" stop-color="#9aa3af" stop-opacity=".35"/>
+<stop offset="100%" stop-color="#9aa3af" stop-opacity="0"/>
+</radialGradient>
+<linearGradient id="sheen" gradientUnits="userSpaceOnUse" x1="-70" y1="-70" x2="70" y2="70">
+<stop offset="0%" stop-color="#e8ecf2"/>
+<stop offset="50%" stop-color="#8f97a3"/>
+<stop offset="100%" stop-color="#23272e"/>
+<animateTransform attributeName="gradientTransform" type="rotate" from="0" to="360" dur="10s" repeatCount="indefinite"/>
+</linearGradient>
+<linearGradient id="sheen2" gradientUnits="userSpaceOnUse" x1="70" y1="-70" x2="-70" y2="70">
+<stop offset="0%" stop-color="#f3f5f8"/>
+<stop offset="50%" stop-color="#7d8591"/>
+<stop offset="100%" stop-color="#191c21"/>
+<animateTransform attributeName="gradientTransform" type="rotate" from="360" to="0" dur="10s" repeatCount="indefinite"/>
+</linearGradient>
+</defs>
+<g transform="translate(128 128)">
+<circle r="94" fill="url(#halo)">
+<animate attributeName="opacity" values=".6;1;.6" dur="10s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</circle>
+<g>
+<animateTransform attributeName="transform" type="rotate" values="-8;8;-8" dur="10s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+<path fill="url(#sheen)" fill-rule="evenodd" d="M-66,0 A40,40 0 1,0 14,0 A40,40 0 1,0 -66,0 Z M-46,0 A20,20 0 1,1 -6,0 A20,20 0 1,1 -46,0 Z"/>
+<path fill="url(#sheen2)" fill-rule="evenodd" opacity=".88" d="M-14,0 A40,40 0 1,0 66,0 A40,40 0 1,0 -14,0 Z M6,0 A20,20 0 1,1 46,0 A20,20 0 1,1 6,0 Z"/>
+<circle cx="0" cy="0" r="7" fill="#f5f7fa">
+<animate attributeName="opacity" values=".5;1;.5" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</circle>
+</g>
+</g>
+</svg>

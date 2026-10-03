@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<defs>
+<radialGradient id="halo" cx="60%" cy="40%" r="55%">
+<stop offset="0%" stop-color="#7dd3fc" stop-opacity=".45"/>
+<stop offset="100%" stop-color="#7dd3fc" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="head" cx="40%" cy="34%" r="78%">
+<stop offset="0%" stop-color="#f2fdff"/>
+<stop offset="50%" stop-color="#67c6f2"/>
+<stop offset="100%" stop-color="#0c3a5c"/>
+</radialGradient>
+<linearGradient id="tail" x1="1" y1="0" x2="0" y2="1">
+<stop offset="0%" stop-color="#bfeaff" stop-opacity=".9"/>
+<stop offset="100%" stop-color="#3a86c8" stop-opacity="0"/>
+</linearGradient>
+<filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+<feGaussianBlur stdDeviation="5"/>
+</filter>
+</defs>
+<g transform="translate(128 128)">
+<circle cx="20" cy="-20" r="92" fill="url(#halo)">
+<animate attributeName="opacity" values=".6;1;.6" dur="7s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</circle>
+<g>
+<animateTransform attributeName="transform" type="translate" values="0 0;9 -9;0 0" dur="7s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+<path fill="url(#tail)" filter="url(#soft)" d="M18,-44 C-14,-36 -50,-2 -80,42 C-44,22 -8,4 34,-14 Z">
+<animate attributeName="opacity" values=".55;.95;.55" dur="7s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</path>
+<path fill="url(#tail)" filter="url(#soft)" opacity=".5" d="M30,-22 C0,-14 -34,10 -58,42 C-28,28 2,12 40,0 Z">
+<animate attributeName="opacity" values=".3;.65;.3" dur="7s" begin="-3.5s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</path>
+<circle cx="30" cy="-30" r="31" fill="url(#head)"/>
+<circle cx="22" cy="-40" r="10" fill="#ffffff" opacity=".75">
+<animate attributeName="opacity" values=".5;.95;.5" dur="7s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</circle>
+</g>
+</g>
+</svg>

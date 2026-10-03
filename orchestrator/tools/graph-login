@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""graph-login — connect an Outlook mailbox to the interns (device code flow).
+
+    tools/graph-login --mailbox work [--label "Work"]
+
+Prints a code to enter at microsoft.com/devicelogin, then stores the MSAL
+token cache in ~/.interns/mailboxes/<id>/token.json (0600) and adds <id> to
+"mailboxes" in ~/.interns/config.json. Asks for Mail.ReadWrite (read mail,
+create drafts; graph-mail never sends) and Calendars.Read (meeting briefs).
+Needs graph.client_id in config.json: the Application (client) ID of an
+Entra app registration with "Allow public client flows" on — see README.
+Restart the orchestrator afterwards so it starts polling the new mailbox.
+"""
+import argparse, json, os, re, sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _graph  # noqa: E402
+
+
+def die(msg, code=1):
+    print(json.dumps({"error": msg}))
+    sys.exit(code)
+
+
+def main():
+    p = argparse.ArgumentParser(prog="graph-login", description="Connect an Outlook mailbox (device code flow).")
+    p.add_argument("--mailbox", required=True, help="short id for this mailbox, e.g. work or personal")
+    p.add_argument("--label", default=None, help="display label (default: the id)")
+    args = p.parse_args()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", args.mailbox):
+        die("--mailbox must be lowercase letters, digits, - or _", 2)
+    _graph.ensure_msal()
+    import msal
+
+    mailbox_dir = os.path.join(_graph.interns_home(), "mailboxes", args.mailbox)
+    os.makedirs(mailbox_dir, mode=0o700, exist_ok=True)
+    client_id, authority = _graph.client_settings(mailbox_dir)
+    if not client_id:
+        die("set graph.client_id in ~/.interns/config.json first (see README › Outlook)")
+
+    cache = msal.SerializableTokenCache()
+    app = msal.PublicClientApplication(client_id, authority=authority, token_cache=cache)
+    flow = app.initiate_device_flow(scopes=_graph.MAIL_SCOPES + _graph.CAL_SCOPES)
+    if "user_code" not in flow:
+        die(f"could not start device flow: {flow.get('error_description') or flow}")
+    print(flow["message"], file=sys.stderr, flush=True)
+    result = app.acquire_token_by_device_flow(flow)
+    if "access_token" not in result:
+        die(f"sign-in failed: {result.get('error_description') or result.get('error')}")
+
+    cache_path = os.path.join(mailbox_dir, "token.json")
+    with open(cache_path + ".tmp", "w") as f:
+        f.write(cache.serialize())
+    os.replace(cache_path + ".tmp", cache_path)
+    os.chmod(cache_path, 0o600)
+    cfg = _graph.mailbox_config(mailbox_dir)
+    cfg["mailbox_label"] = args.label or cfg.get("mailbox_label") or args.mailbox
+    with open(os.path.join(mailbox_dir, "config.json"), "w") as f:
+        json.dump(cfg, f, indent=2)
+
+    config_path = os.path.join(_graph.interns_home(), "config.json")
+    config = _graph.settings()
+    if args.mailbox not in (config.get("mailboxes") or []):
+        config["mailboxes"] = [*(config.get("mailboxes") or []), args.mailbox]
+        with open(config_path + ".tmp", "w") as f:
+            json.dump(config, f, indent=2)
+            f.write("\n")
+        os.replace(config_path + ".tmp", config_path)
+        os.chmod(config_path, 0o600)
+    account = (result.get("id_token_claims") or {}).get("preferred_username")
+    print(json.dumps({"mailbox": args.mailbox, "account": account, "token_cache": cache_path,
+                      "next": "restart the orchestrator so it polls this mailbox"}, indent=1))
+
+
+if __name__ == "__main__":
+    main()

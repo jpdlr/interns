@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""graph-cal — read-only Outlook calendar CLI for interns.
+
+Same style as graph-mail (tools/graph-mail): --mailbox <id> flag (default:
+the first configured mailbox), the same mailbox dirs and token caches
+(_graph.py), the same JSON-out / JSON-error / nonzero-exit conventions.
+
+HARD GUARDRAIL: there is NO write capability here — no event creation, no
+accepting/declining invites, no updates of any kind. Interns may read the
+calendar and propose (e.g. via a card) but never book on the owner's behalf. Do not
+add write/accept/create.
+"""
+import argparse, html, json, os, re, sys, urllib.parse, urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _graph  # noqa: E402
+
+# Calendar reads need Calendars.Read on top of Mail.ReadWrite; graph-login
+# asks for both, so one cache serves graph-mail and graph-cal.
+MAILBOXES = _graph.mailbox_dirs()
+SCOPES = _graph.MAIL_SCOPES + _graph.CAL_SCOPES
+GRAPH = "https://graph.microsoft.com/v1.0"
+# Briefings are time-sensitive and read at a glance — ask Graph to return
+# start/end in the owner's local time instead of UTC.
+LOCAL_TZ = _graph.local_timezone()
+
+
+def die(msg, code=1):
+    print(json.dumps({"error": msg}))
+    sys.exit(code)
+
+
+def get_token(mailbox_dir):
+    return _graph.get_token(mailbox_dir, SCOPES, "graph-cal", die)
+
+
+def graph(token, path, method="GET"):
+    # calendarView query params (ISO datetimes with a literal '+' offset) need
+    # care: urllib.parse.quote's default safe set leaves '+' alone, but Graph
+    # only sees the raw request line, so make sure '+' is percent-encoded too
+    # (a bare '+' in a query string is read as a space by many parsers).
+    # '%' stays safe so an already-encoded @odata.nextLink (paginated
+    # calendarView results) isn't double-escaped when it round-trips back
+    # through here; '+' is excluded from safe so a literal '+' offset (e.g.
+    # in an ISO datetime) can't be misread as a space by the receiving server.
+    safe_path = urllib.parse.quote(path, safe="/?$=&'()," + ":@%")
+    req = urllib.request.Request(GRAPH + safe_path, method=method,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+                 "Prefer": f'outlook.timezone="{LOCAL_TZ}"'})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = r.read()
+            return json.loads(data) if data else {}
+    except urllib.error.HTTPError as e:
+        die(f"graph {method} {path}: HTTP {e.code} {e.read().decode()[:300]}")
+
+
+def strip_html(s):
+    s = re.sub(r"<style.*?</style>", "", s or "", flags=re.S | re.I)
+    s = re.sub(r"<[^>]+>", " ", s)
+    return re.sub(r"\s+", " ", html.unescape(s)).strip()
+
+
+def _iso_utc(dt):
+    """Format a naive/aware datetime as the Zulu string calendarView wants."""
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _attendee(a):
+    ea = a.get("emailAddress", {}) or {}
+    return {
+        "name": ea.get("name"),
+        "email": ea.get("address"),
+        "response_status": (a.get("status") or {}).get("response"),
+    }
+
+
+def _dt_field(field):
+    """Graph event start/end object -> {iso, local, timezone}.
+
+    With the `Prefer: outlook.timezone=` header set, `dateTime` comes back as
+    a naive wall-clock string already in LOCAL_TZ (no UTC form is returned
+    alongside it). Localize it with zoneinfo and derive the UTC ISO form from
+    that, so callers get both a human local time and a real ISO-8601 UTC
+    timestamp rather than duplicating one string under two keys.
+    """
+    if not field:
+        return {"iso": None, "local": None, "timezone": None}
+    raw = field.get("dateTime")
+    tz_name = field.get("timeZone") or LOCAL_TZ
+    local_iso = None
+    utc_iso = None
+    if raw:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        try:
+            zone = ZoneInfo(LOCAL_TZ)
+        except ZoneInfoNotFoundError:
+            zone = None
+        try:
+            naive = datetime.fromisoformat(raw)
+        except ValueError:
+            naive = None
+        if naive is not None and zone is not None:
+            localized = naive.replace(tzinfo=zone)
+            local_iso = localized.isoformat()
+            utc_iso = localized.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
+        else:
+            # Fallback: report the raw string as-is under both keys rather than
+            # dropping the event's time entirely.
+            local_iso = raw
+            utc_iso = raw
+    return {"iso": utc_iso, "local": local_iso, "timezone": tz_name}
+
+
+def event_fields(e, body=False):
+    attendees = [_attendee(a) for a in (e.get("attendees") or [])]
+    out = {
+        "id": e.get("id"),
+        "subject": e.get("subject"),
+        "start": _dt_field(e.get("start")),
+        "end": _dt_field(e.get("end")),
+        "all_day": bool(e.get("isAllDay")),
+        "location": (e.get("location") or {}).get("displayName") or None,
+        "organizer": _attendee({"emailAddress": (e.get("organizer") or {}).get("emailAddress", {}), "status": {}}),
+        "attendees": attendees,
+        "is_online_meeting": bool(e.get("isOnlineMeeting")),
+        "web_link": e.get("webLink"),
+        "body_preview": strip_html(e.get("bodyPreview") or "")[:400] or None,
+    }
+    if body:
+        out["body"] = strip_html((e.get("body") or {}).get("content", ""))[:8000]
+    return out
+
+
+def _fetch_view(token, start, end, top=100):
+    # Built raw (unencoded) and quoted exactly once inside graph() — see the
+    # comment there. Pre-encoding here and quoting again would double-escape
+    # the datetime values (e.g. "%3A" becoming "%253A"), which Graph rejects.
+    path = (
+        f"/me/calendarView?startDateTime={_iso_utc(start)}&endDateTime={_iso_utc(end)}"
+        f"&$orderby=start/dateTime&$top={top}"
+        f"&$select=id,subject,start,end,isAllDay,location,organizer,attendees,"
+        f"isOnlineMeeting,webLink,bodyPreview"
+    )
+    events = []
+    while path:
+        r = graph(token, path)
+        events.extend(r.get("value", []))
+        next_link = r.get("@odata.nextLink")
+        if next_link and next_link.startswith(GRAPH):
+            path = next_link[len(GRAPH):]
+        else:
+            path = None
+    events.sort(key=lambda e: ((e.get("start") or {}).get("dateTime") or ""))
+    return events
+
+
+def day_window_utc(date_str, days=1):
+    """Local-calendar day(s) starting at `date_str` (YYYY-MM-DD in LOCAL_TZ) as a UTC window."""
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+    start_local = datetime.fromisoformat(date_str).replace(tzinfo=ZoneInfo(LOCAL_TZ))
+    start = start_local.astimezone(timezone.utc)
+    return start, start + timedelta(days=days)
+
+
+def cmd_agenda(token, args):
+    from datetime import datetime, timedelta, timezone
+    if args.date:
+        # a whole local day (Today screen), not "the next 24 hours from now"
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", args.date):
+            die("--date must be YYYY-MM-DD")
+        now, end = day_window_utc(args.date, args.days)
+    else:
+        now = datetime.now(timezone.utc)
+        end = now + timedelta(days=args.days)
+    events = _fetch_view(token, now, end)
+    return [event_fields(e) for e in events]
+
+
+def cmd_next(token, args):
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    end = now + timedelta(minutes=args.within_minutes)
+    events = _fetch_view(token, now, end)
+    out = []
+    for e in events:
+        if e.get("isAllDay"):
+            continue  # all-day blocks are not "meetings" for `next`
+        out.append(event_fields(e))
+    return out
+
+
+def cmd_event(token, args):
+    r = graph(token, f"/me/events/{args.event_id}"
+                     f"?$select=id,subject,start,end,isAllDay,location,organizer,attendees,"
+                     f"isOnlineMeeting,webLink,bodyPreview,body")
+    return event_fields(r, body=True)
+
+
+def main():
+    p = argparse.ArgumentParser(prog="graph-cal", description="Read-only Outlook calendar CLI (no writes).")
+    p.add_argument("--mailbox", choices=sorted(MAILBOXES) or None, default=_graph.default_mailbox(MAILBOXES),
+                   help="which mailbox's token cache/config to use (default: the first configured)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("agenda"); s.add_argument("--days", type=int, default=1)
+    s.add_argument("--date", default=None, help="start at local midnight of YYYY-MM-DD instead of now")
+    s = sub.add_parser("next"); s.add_argument("--within-minutes", type=int, default=120, dest="within_minutes")
+    s = sub.add_parser("event"); s.add_argument("event_id")
+    args = p.parse_args()
+    if not args.mailbox:
+        die("no mailbox configured — add one with tools/graph-login --mailbox <id> (see README › Outlook)", 2)
+    _graph.ensure_msal()
+    args.mailbox_dir = MAILBOXES[args.mailbox]
+    token = get_token(args.mailbox_dir)
+    out = {"agenda": cmd_agenda, "next": cmd_next, "event": cmd_event}[args.cmd](token, args)
+    print(json.dumps(out, indent=1))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,67 @@
+#!/usr/bin/env node
+/**
+ * room-pad — the shared scratchpad of a group chat.
+ *
+ * Every room has one markdown pad pinned above the conversation: decisions,
+ * owners, open questions. JP edits it in the app; interns use this CLI.
+ *
+ * Usage:
+ *   room-pad --room <room-id> get
+ *   room-pad --room <room-id> append --text "- decided: ship Friday (Rhea)" [--intern <your-slug>]
+ *   room-pad --room <room-id> set --file ./pad.md [--intern <your-slug>]
+ *
+ * Pass --intern so the thread gets a one-line "X updated the scratchpad" note.
+ * JSON on stdout; errors are {"error": "..."} with a nonzero exit.
+ */
+const fs = process.getBuiltinModule("node:fs");
+const os = process.getBuiltinModule("node:os");
+const path = process.getBuiltinModule("node:path");
+
+function out(obj) { process.stdout.write(JSON.stringify(obj, null, 1) + "\n"); }
+function die(msg, extra) { out({ error: msg, ...(extra ? { detail: extra } : {}) }); process.exit(1); }
+function internsHome() { return process.env.INTERNS_HOME || path.join(os.homedir(), ".interns"); }
+function loadConfig() {
+  const file = path.join(internsHome(), "config.json");
+  if (!fs.existsSync(file)) die(`no orchestrator config at ${file}`);
+  const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (!cfg.api_token) die(`no api_token in ${file}`);
+  return { token: cfg.api_token, port: cfg.port || 7810 };
+}
+async function api(method, route, body) {
+  const { token, port } = loadConfig();
+  const url = `http://127.0.0.1:${port}${route}`;
+  let res;
+  try {
+    res = await fetch(url, { method, headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(20000) });
+  } catch (e) { die(`cannot reach the orchestrator API at ${url} — is it running?`); }
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { die(`${method} ${route}: non-JSON response (HTTP ${res.status})`); }
+  if (!res.ok) die(`${method} ${route}: ${(data && data.error) || `HTTP ${res.status}`}`, data && data.detail);
+  return data;
+}
+function parseArgs(argv) {
+  const flags = {}; const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a.startsWith("--")) { const eq = a.indexOf("="); if (eq !== -1) flags[a.slice(2, eq)] = a.slice(eq + 1); else { const n = argv[i + 1]; if (n === undefined || n.startsWith("--")) die(`flag ${a} needs a value`); flags[a.slice(2)] = n; i++; } }
+    else positional.push(a);
+  }
+  return { flags, positional };
+}
+const USAGE = "room-pad --room <id> get | append --text <md> [--intern <slug>] | set --file <path>|--text <md> [--intern <slug>]";
+async function main() {
+  const argv = process.argv.slice(2);
+  if (!argv.length || argv[0] === "--help" || argv[0] === "-h") { out({ usage: USAGE }); process.exit(argv.length ? 0 : 1); }
+  const { flags, positional } = parseArgs(argv);
+  const room = flags.room;
+  if (!room) die("--room is required (the room id, e.g. room-…)");
+  const cmd = positional[0] || "get";
+  if (cmd === "get") return api("GET", `/rooms/${encodeURIComponent(room)}/scratchpad`);
+  const text = flags.file ? fs.readFileSync(path.resolve(flags.file), "utf8") : flags.text;
+  if (typeof text !== "string" || !text.trim()) die("--text or --file is required");
+  if (cmd === "append") return api("PUT", `/rooms/${encodeURIComponent(room)}/scratchpad`, { scratchpad: text, append: true, ...(flags.intern ? { author: flags.intern } : {}) });
+  if (cmd === "set") return api("PUT", `/rooms/${encodeURIComponent(room)}/scratchpad`, { scratchpad: text, ...(flags.intern ? { author: flags.intern } : {}) });
+  die(`unknown command: ${cmd}`, USAGE);
+}
+main().then((r) => out(r), (e) => die(e && e.message ? e.message : String(e)));

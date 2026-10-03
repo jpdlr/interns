@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1360 480">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b0d12"/>
+      <stop offset="0.6" stop-color="#12151d"/>
+      <stop offset="1" stop-color="#1a1430"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.78" cy="0.45" r="0.5">
+      <stop offset="0" stop-color="#8b5cf6" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+  <rect width="1360" height="480" fill="url(#bg)"/>
+  <rect width="1360" height="480" fill="url(#glow)"/>
+  <!-- faint scattered sparks -->
+  <g fill="#f8fafc">
+    <path d="M180 90 l4 10 10 4 -10 4 -4 10 -4 -10 -10 -4 10 -4 Z" opacity="0.25"/>
+    <path d="M1210 380 l5 12 12 5 -12 5 -5 12 -5 -12 -12 -5 12 -5 Z" opacity="0.3"/>
+    <circle cx="320" cy="400" r="4" opacity="0.15"/>
+    <circle cx="1120" cy="110" r="5" opacity="0.2"/>
+    <circle cx="90" cy="300" r="3" opacity="0.12"/>
+  </g>
+  <!-- coordinator head, right side -->
+  <g filter="url(#soft)" transform="translate(880,90) scale(1.35)">
+    <rect x="52" y="66" width="152" height="142" rx="70" fill="#f8fafc"/>
+    <path d="M66 118 A64 64 0 0 1 190 118" fill="none" stroke="#1e2430" stroke-width="11" stroke-linecap="round"/>
+    <rect x="47" y="106" width="16" height="34" rx="8" fill="#1e2430"/>
+    <rect x="193" y="106" width="16" height="34" rx="8" fill="#1e2430"/>
+    <path d="M58 138 Q64 172 96 178" fill="none" stroke="#1e2430" stroke-width="8" stroke-linecap="round"/>
+    <circle cx="103" cy="179" r="8" fill="#1e2430"/>
+    <rect x="107" y="122" width="11" height="34" rx="5.5" fill="#1e2430" transform="rotate(-4 112 139)"/>
+    <rect x="143" y="118" width="11" height="34" rx="5.5" fill="#1e2430" transform="rotate(4 148 135)"/>
+  </g>
+  <path d="M1214 122 L1221 139 L1238 146 L1221 153 L1214 170 L1207 153 L1190 146 L1207 139 Z" fill="#f8fafc" opacity="0.9"/>
+  <!-- wordmark -->
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="96" y="238" fill="#f8fafc" font-size="76" font-weight="bold" letter-spacing="1">Chaos Coordinator</text>
+    <text x="98" y="298" fill="#9aa3b2" font-size="34" letter-spacing="6">THE INTERNS · HEAD OFFICE</text>
+    <rect x="100" y="330" width="64" height="6" rx="3" fill="#8b5cf6"/>
+    <rect x="172" y="330" width="24" height="6" rx="3" fill="#f59e0b"/>
+    <rect x="204" y="330" width="12" height="6" rx="3" fill="#22c55e"/>
+  </g>
+</svg>

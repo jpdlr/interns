@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<defs>
+<radialGradient id="halo" cx="50%" cy="50%" r="50%">
+<stop offset="0%" stop-color="#6366f1" stop-opacity=".45"/>
+<stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+</radialGradient>
+<linearGradient id="band" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0%" stop-color="#20207a"/>
+<stop offset="45%" stop-color="#818cf8"/>
+<stop offset="70%" stop-color="#c7d2ff"/>
+<stop offset="100%" stop-color="#3730a3"/>
+</linearGradient>
+<linearGradient id="band2" x1="1" y1="0" x2="0" y2="0">
+<stop offset="0%" stop-color="#4f46e5"/>
+<stop offset="60%" stop-color="#a5b4fc"/>
+<stop offset="100%" stop-color="#1e1b6b"/>
+</linearGradient>
+</defs>
+<g transform="translate(128 128)">
+<ellipse rx="98" ry="78" fill="url(#halo)">
+<animate attributeName="opacity" values=".65;1;.65" dur="8s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</ellipse>
+<path fill="url(#band2)" opacity=".65" d="M-84,26 C-36,-18 36,64 84,14 L84,42 C36,92 -36,10 -84,54 Z">
+<animate attributeName="d" dur="8s" begin="-4s" repeatCount="indefinite" calcMode="spline"
+keyTimes="0;.5;1" keySplines=".42 0 .58 1;.42 0 .58 1"
+values="M-84,26 C-36,-18 36,64 84,14 L84,42 C36,92 -36,10 -84,54 Z;
+M-84,38 C-36,74 36,-14 84,30 L84,58 C36,14 -36,102 -84,66 Z;
+M-84,26 C-36,-18 36,64 84,14 L84,42 C36,92 -36,10 -84,54 Z"/>
+</path>
+<path fill="url(#band)" d="M-84,-28 C-36,-72 36,20 84,-32 L84,-2 C36,50 -36,-42 -84,2 Z">
+<animate attributeName="d" dur="8s" repeatCount="indefinite" calcMode="spline"
+keyTimes="0;.5;1" keySplines=".42 0 .58 1;.42 0 .58 1"
+values="M-84,-28 C-36,-72 36,20 84,-32 L84,-2 C36,50 -36,-42 -84,2 Z;
+M-84,-16 C-36,20 36,-60 84,-14 L84,14 C36,-32 -36,50 -84,12 Z;
+M-84,-28 C-36,-72 36,20 84,-32 L84,-2 C36,50 -36,-42 -84,2 Z"/>
+</path>
+</g>
+</svg>

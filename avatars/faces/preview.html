@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interns — Bot Face Gallery</title>
+<style>
+  :root {
+    --bg: #0d0f14;
+    --tile: #14171f;
+    --text: #e8eaf0;
+    --muted: #8b91a0;
+    --border: #232733;
+  }
+  body.light {
+    --bg: #f4f5f8;
+    --tile: #ffffff;
+    --text: #1a1d26;
+    --muted: #6b7180;
+    --border: #e2e5ec;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    transition: background .3s, color .3s;
+    padding: 40px 24px 64px;
+  }
+  header {
+    max-width: 1100px;
+    margin: 0 auto 32px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: .02em; }
+  h1 span { color: var(--muted); font-weight: 400; }
+  nav.themes { font-size: 13px; color: var(--muted); }
+  nav.themes a { color: var(--muted); text-decoration: none; }
+  nav.themes a:hover { color: var(--text); }
+  nav.themes .current { color: var(--text); font-weight: 600; }
+  #toggle {
+    background: var(--tile);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 16px;
+    font: inherit;
+    cursor: pointer;
+    transition: background .3s, color .3s, border-color .3s;
+  }
+  #toggle:hover { border-color: var(--muted); }
+  .grid {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+  }
+  .tile {
+    background: var(--tile);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 14px 16px;
+    text-align: center;
+    transition: background .3s, border-color .3s;
+  }
+  .tile .art { margin: 0 auto 10px; min-height: 160px; }
+  .tile img { width: 160px; height: 160px; display: block; margin: 0 auto; }
+  .tile .id { font-size: 12px; color: var(--muted); letter-spacing: .06em; }
+  .tile .vibe { font-size: 14px; font-weight: 550; margin-top: 2px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Interns <span>— bot faces, 20 blinking companions</span></h1>
+    <nav class="themes"><a href="../preview.html">Blobs</a> | <span class="current">Bot faces</span></nav>
+  </div>
+  <button id="toggle" type="button">Light background</button>
+</header>
+<div class="grid" id="grid"></div>
+<script>
+  const avatars = [
+    ["face-01", "Beep — alert TV"],
+    ["face-02", "Boop — curious cloud"],
+    ["face-03", "Doz — sleepy"],
+    ["face-04", "Pip — tiny wanderer"],
+    ["face-05", "Miso — serene, beret"],
+    ["face-06", "Jinx — mischievous"],
+    ["face-07", "Nimbus — dreamy, halo"],
+    ["face-08", "Echo — attentive close-up"],
+    ["face-09", "Onyx-bot — midnight gear"],
+    ["face-10", "Tato — happy bean"],
+    ["face-11", "Lumen — watchful tower"],
+    ["face-12", "Fizz — excited sun"],
+    ["face-13", "Mellow — mellow"],
+    ["face-14", "Scout — inquisitive, sprout"],
+    ["face-15", "Blip — shy"],
+    ["face-16", "Juno — cyclops gem"],
+    ["face-17", "Turbo — bold"],
+    ["face-18", "Wisp — gentle, tail"],
+    ["face-19", "Zippo — cheeky, ears"],
+    ["face-20", "Nod — content nodder"]
+  ];
+  const grid = document.getElementById("grid");
+  async function build() {
+    for (const [id, vibe] of avatars) {
+      const tile = document.createElement("div");
+      tile.className = "tile";
+      tile.innerHTML =
+        '<div class="art"></div>' +
+        '<div class="id">' + id + '</div>' +
+        '<div class="vibe">' + vibe + '</div>';
+      grid.appendChild(tile);
+      const art = tile.querySelector(".art");
+      try {
+        const res = await fetch(id + ".svg");
+        if (!res.ok) throw new Error(res.status);
+        const sh = art.attachShadow({ mode: "open" });
+        sh.innerHTML =
+          "<style>:host{display:block}svg{width:160px;height:160px;display:block;margin:0 auto}</style>" +
+          await res.text();
+      } catch (e) {
+        art.innerHTML = '<img src="' + id + '.svg" alt="' + vibe + '" width="160" height="160">';
+      }
+    }
+  }
+  build();
+  const btn = document.getElementById("toggle");
+  btn.addEventListener("click", () => {
+    document.body.classList.toggle("light");
+    btn.textContent = document.body.classList.contains("light")
+      ? "Dark background" : "Light background";
+  });
+</script>
+</body>
+</html>

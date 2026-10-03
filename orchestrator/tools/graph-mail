@@ -1,0 +1,477 @@
+#!/usr/bin/env python3
+"""graph-mail — read-and-draft-only Outlook CLI for interns.
+
+Reads any mailbox listed in ~/.interns/config.json "mailboxes" via
+--mailbox <id> (default: the first). Each mailbox has its own dir under
+~/.interns/mailboxes/<id> with a config.json + MSAL device-flow token cache
+(token.json), created by tools/graph-login — see _graph.py. Token refreshes
+use acquire_token_silent + an atomic rewrite so a running mailbox's cache is
+never corrupted by a concurrent read/refresh (this tool and graph-cal both
+touch it).
+
+HARD GUARDRAIL: there is NO send capability here. Drafts only — every outbound
+mail is created as a draft in the target mailbox for human review. Do not add
+send. The `drafts` subcommand only READS the Drafts folder (to spot drafts that
+were prepared but never sent); it must never gain send or delete.
+
+Replies are reply-all drafts that keep the thread: `draft --reply-to` creates
+the draft with Graph's createReplyAll (so To/Cc/subject/conversation are
+Outlook's own) and splices the owner's text into the HTML body above the quoted
+history Graph pre-fills — it never replaces the body, which is what used to
+drop the earlier emails. A reply that cannot be made fails loudly (exit 3); it
+never falls back to a fresh email.
+
+The one delete path: `revise-draft` and `delete-draft` may move a draft to
+Deleted Items, but only a draft this tool created itself (recorded in
+drafts-ledger.json in the mailbox dir). The owner's own drafts are never touched.
+
+Exit codes: 0 ok, 2 usage, 3 no repliable message in the thread, 4 draft not
+created by this tool, 5 Graph error.
+"""
+import argparse, html, json, os, re, sys, urllib.parse, urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _graph  # noqa: E402
+
+MAILBOXES = _graph.mailbox_dirs()
+SCOPES = _graph.MAIL_SCOPES
+GRAPH = "https://graph.microsoft.com/v1.0"
+
+
+EXIT_USAGE, EXIT_NO_TARGET, EXIT_NOT_OURS, EXIT_GRAPH = 2, 3, 4, 5
+
+
+def die(msg, code=1):
+    print(json.dumps({"error": msg}))
+    sys.exit(code)
+
+
+def get_token(mailbox_dir):
+    return _graph.get_token(mailbox_dir, SCOPES, "graph-mail", die)
+
+
+class GraphError(Exception):
+    pass
+
+
+def graph(token, path, method="GET", body=None, fatal=True):
+    safe_path = urllib.parse.quote(path, safe="/?$=&'()+,:@")
+    req = urllib.request.Request(GRAPH + safe_path, method=method,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        data=json.dumps(body).encode() if body is not None else None)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = r.read()
+            return json.loads(data) if data else {}
+    except urllib.error.HTTPError as e:
+        msg = f"graph {method} {path}: HTTP {e.code} {e.read().decode()[:300]}"
+        if not fatal:
+            raise GraphError(msg)
+        die(msg, EXIT_GRAPH)
+
+
+def strip_html(s):
+    s = re.sub(r"<style.*?</style>", "", s or "", flags=re.S | re.I)
+    s = re.sub(r"<[^>]+>", " ", s)
+    return re.sub(r"\s+", " ", html.unescape(s)).strip()
+
+
+def _parse_iso(s):
+    """Parse a Graph UTC timestamp into an aware datetime, or None.
+
+    Graph normally emits '...Z', but occasionally 7-digit fractional seconds
+    ('2026-08-11T12:00:00.0000000Z'), which older Pythons reject. A draft with
+    an odd timestamp must degrade to "age unknown" rather than crash a whole
+    triage sweep, so every failure path returns None instead of raising.
+    """
+    from datetime import datetime, timezone
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        m = re.match(r"^(.*\.\d{6})\d*(Z|[+-]\d{2}:?\d{2})?$", s)
+        if not m:
+            return None
+        try:
+            dt = datetime.fromisoformat(m.group(1) + (m.group(2) or "Z").replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def msg_fields(m, body=False):
+    out = {
+        "id": m.get("id"),
+        "conversationId": m.get("conversationId"),
+        "from": (m.get("from") or {}).get("emailAddress", {}).get("address"),
+        "to": [r.get("emailAddress", {}).get("address") for r in m.get("toRecipients", [])],
+        "subject": m.get("subject"),
+        "received": m.get("receivedDateTime") or m.get("sentDateTime"),
+        "preview": (m.get("bodyPreview") or "")[:300],
+    }
+    if body:
+        out["body"] = strip_html((m.get("body") or {}).get("content", ""))[:8000]
+    return out
+
+
+def cmd_whoami(token, args):
+    # Token is Mail.ReadWrite only (no User.Read) — verify access via the mailbox itself.
+    inbox = graph(token, "/me/mailFolders/inbox?$select=displayName,totalItemCount,unreadItemCount")
+    cfg = json.load(open(os.path.join(args.mailbox_dir, "config.json")))
+    return {"mailbox": args.mailbox, "mailbox_label": cfg.get("mailbox_label"),
+            "inbox_total": inbox.get("totalItemCount"), "inbox_unread": inbox.get("unreadItemCount")}
+
+
+def _list(token, folder, days, top):
+    from datetime import datetime, timedelta, timezone
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    field = "sentDateTime" if folder == "sentitems" else "receivedDateTime"
+    r = graph(token, f"/me/mailFolders/{folder}/messages?$filter={field} ge {since}"
+                     f"&$orderby={field} desc&$top={top}"
+                     f"&$select=id,conversationId,from,toRecipients,subject,receivedDateTime,sentDateTime,bodyPreview")
+    return [msg_fields(m) for m in r.get("value", [])]
+
+
+def cmd_inbox(token, args):
+    return _list(token, "inbox", args.days, args.top)
+
+
+def cmd_sent(token, args):
+    return _list(token, "sentitems", args.days, args.top)
+
+
+def cmd_thread(token, args):
+    r = graph(token, f"/me/messages?$filter=conversationId eq '{args.conversation_id}'"
+                     f"&$top=50&$select=id,conversationId,from,toRecipients,subject,receivedDateTime,sentDateTime,body")
+    msgs = [msg_fields(m, body=True) for m in r.get("value", [])]
+    return sorted(msgs, key=lambda m: m["received"] or "")
+
+
+def cmd_search(token, args):
+    r = graph(token, f'/me/messages?$search="{args.query}"&$top={args.top}'
+                     f"&$select=id,conversationId,from,toRecipients,subject,receivedDateTime,bodyPreview")
+    return [msg_fields(m) for m in r.get("value", [])]
+
+
+def draft_fields(m, now):
+    """One Drafts-folder message -> a flat row. Pure: no I/O, no clock."""
+    created = _parse_iso(m.get("createdDateTime"))
+    modified = _parse_iso(m.get("lastModifiedDateTime"))
+    stamp = modified or created
+    age_hours = round((now - stamp).total_seconds() / 3600.0, 1) if stamp else None
+    to = [r.get("emailAddress", {}).get("address") for r in m.get("toRecipients", [])]
+    to = [a for a in to if a]
+    subject = m.get("subject") or ""
+    return {
+        "draft_id": m.get("id"),
+        "conversationId": m.get("conversationId"),
+        "subject": subject,
+        "to": to,
+        "created": m.get("createdDateTime"),
+        "last_modified": m.get("lastModifiedDateTime"),
+        "age_hours": age_hours,
+        # A draft with no recipients cannot be sent at all — almost always a
+        # half-composed scratch, not something to chase the owner about.
+        "sendable": bool(to),
+        "looks_like_reply": bool(re.match(r"^\s*(re|fw|fwd)\s*:", subject, re.I)),
+        "preview": (m.get("bodyPreview") or "")[:300],
+        "web_link": m.get("webLink"),
+    }
+
+
+def classify_drafts(messages, now, min_age_hours):
+    """Mark drafts that are addressed and have sat untouched past the threshold.
+
+    Sitting in the Drafts folder IS the unsent signal: Outlook moves a message
+    out of Drafts into Sent Items the moment it is sent, so anything still here
+    was never sent. Age is measured from lastModifiedDateTime, not created, so
+    a draft the owner is actively editing does not read as neglected.
+    """
+    rows = [draft_fields(m, now) for m in messages]
+    for r in rows:
+        r["stale"] = bool(
+            r["sendable"] and r["age_hours"] is not None and r["age_hours"] >= min_age_hours)
+    # Oldest first; unknown-age last so it is visible but never sorts as urgent.
+    rows.sort(key=lambda r: (r["age_hours"] is None, -(r["age_hours"] or 0.0)))
+    return rows
+
+
+def cmd_drafts(token, args):
+    """READ-ONLY listing of the Drafts folder. Never sends, patches or deletes."""
+    from datetime import datetime, timezone
+    r = graph(token, f"/me/mailFolders/drafts/messages?$top={args.top}"
+                     f"&$orderby=lastModifiedDateTime desc"
+                     f"&$select=id,conversationId,subject,toRecipients,"
+                     f"createdDateTime,lastModifiedDateTime,bodyPreview,webLink")
+    now = datetime.now(timezone.utc)
+    rows = classify_drafts(r.get("value", []), now, args.min_age_hours)
+    shown = [x for x in rows if x["stale"]] if args.stale_only else rows
+    return {
+        "mailbox": args.mailbox,
+        "checked_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "min_age_hours": args.min_age_hours,
+        "total_drafts": len(rows),
+        "stale_drafts": sum(1 for x in rows if x["stale"]),
+        "unaddressed_drafts": sum(1 for x in rows if not x["sendable"]),
+        "drafts": shown,
+    }
+
+
+# ------------------------------------------------------------------ drafts
+
+LEDGER_CAP = 500
+THREAD_PREVIEWS = 5
+
+
+def ledger_path(mailbox_dir):
+    return os.path.join(mailbox_dir, "drafts-ledger.json")
+
+
+def load_ledger(mailbox_dir):
+    try:
+        data = json.load(open(ledger_path(mailbox_dir)))
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, ValueError):
+        return {}
+
+
+def save_ledger(mailbox_dir, ledger):
+    # newest LEDGER_CAP entries only — the ledger is a guard, not an archive
+    items = sorted(ledger.items(), key=lambda kv: kv[1].get("created_at", ""), reverse=True)[:LEDGER_CAP]
+    tmp = ledger_path(mailbox_dir) + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(dict(items), f, indent=1)
+    os.replace(tmp, ledger_path(mailbox_dir))
+
+
+def _addr(r):
+    return ((r or {}).get("emailAddress") or {}).get("address") or ""
+
+
+def pick_reply_target(messages, me):
+    """The message a reply should answer. Pure: no I/O.
+
+    `messages` are Graph rows from one conversation. The owner's own unsent drafts
+    cannot be replied to, and replying to the owner's own sent message would address
+    the reply to the owner — so the target is the newest message that is not a
+    draft and not from `me`. None when the thread has no such message.
+    """
+    me = (me or "").lower()
+    candidates = [m for m in messages
+                  if not m.get("isDraft") and _addr(m.get("from")).lower() != me]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda m: m.get("receivedDateTime") or m.get("sentDateTime") or "")
+
+
+def text_to_html(text):
+    paras = re.split(r"\n\s*\n", (text or "").strip())
+    return "".join(f"<p>{html.escape(p).replace(chr(10), '<br>')}</p>" for p in paras if p.strip())
+
+
+def splice_reply_body(existing_html, text):
+    """Put the owner's text above the quoted history Graph pre-filled. Pure: no I/O.
+
+    createReplyAll returns a draft whose body is a full HTML document holding
+    the quoted thread. Replacing it (what this tool used to do) is what lost
+    the earlier emails; inserting right after <body> keeps them.
+    """
+    block = f'<div class="interns-reply">{text_to_html(text)}</div><br>'
+    existing_html = existing_html or ""
+    m = re.search(r"<body[^>]*>", existing_html, re.I)
+    if m:
+        return existing_html[:m.end()] + block + existing_html[m.end():]
+    return block + existing_html
+
+
+def strip_reply_block(existing_html):
+    """Remove a previously spliced reply block (revise keeps only the quoted history)."""
+    return re.sub(r'<div class="interns-reply">.*?</div><br>', "", existing_html or "", count=1, flags=re.S)
+
+
+_ME = {}
+
+
+def my_address(token):
+    """The owner's own address for this mailbox (the token is Mail.ReadWrite only — no /me profile)."""
+    if "addr" not in _ME:
+        r = graph(token, "/me/mailFolders/sentitems/messages?$top=1&$select=from")
+        rows = r.get("value", [])
+        _ME["addr"] = _addr(rows[0].get("from")) if rows else ""
+    return _ME["addr"]
+
+
+def conversation(token, conversation_id):
+    r = graph(token, f"/me/messages?$filter=conversationId eq '{conversation_id}'"
+                     f"&$top=50&$select=id,conversationId,from,subject,isDraft,"
+                     f"receivedDateTime,sentDateTime,bodyPreview")
+    return r.get("value", [])
+
+
+def thread_previews(rows, exclude_id=None):
+    """Newest-first {from, date, preview} rows for the app's collapsed thread."""
+    real = [m for m in rows if not m.get("isDraft") and m.get("id") != exclude_id]
+    real.sort(key=lambda m: m.get("receivedDateTime") or m.get("sentDateTime") or "", reverse=True)
+    return [{"from": _addr(m.get("from")) or "unknown",
+             "date": m.get("receivedDateTime") or m.get("sentDateTime"),
+             "preview": (m.get("bodyPreview") or "")[:300]} for m in real[:THREAD_PREVIEWS]]
+
+
+def draft_output(token, args, draft_id, kind, intended_reply, body, in_reply_to=None):
+    d = graph(token, f"/me/messages/{draft_id}?$select=id,conversationId,subject,"
+                     f"toRecipients,ccRecipients,webLink")
+    rows = conversation(token, d["conversationId"]) if d.get("conversationId") and in_reply_to else []
+    return {
+        "draft_id": d["id"],
+        "mailbox": args.mailbox,
+        "kind": kind,
+        "intended_reply": intended_reply,
+        "threaded": kind != "new",
+        "to": [a for a in (_addr(r) for r in d.get("toRecipients", [])) if a],
+        "cc": [a for a in (_addr(r) for r in d.get("ccRecipients", [])) if a],
+        "subject": d.get("subject") or "",
+        "conversation_id": d.get("conversationId"),
+        "in_reply_to": in_reply_to,
+        "web_link": d.get("webLink"),
+        "body": body,
+        "thread": thread_previews(rows, exclude_id=d["id"]),
+        "note": "in the owner's Drafts for review — never sent",
+    }
+
+
+def create_reply(token, args, reply_to, body, sender_only):
+    """Create a threaded reply draft; returns (draft_id, kind, target_id). Exits 3 when impossible."""
+    src = graph(token, f"/me/messages/{reply_to}?$select=id,conversationId,from,isDraft")
+    target = src
+    if src.get("isDraft") or _addr(src.get("from")).lower() == my_address(token).lower():
+        target = pick_reply_target(conversation(token, src["conversationId"]), my_address(token))
+        if not target:
+            die("no repliable message in this thread (only drafts or the owner's own messages) — "
+                "nothing was created; do not fall back to a new email", EXIT_NO_TARGET)
+    action = "createReply" if sender_only else "createReplyAll"
+    draft = graph(token, f"/me/messages/{target['id']}/{action}", "POST", {})
+    full = graph(token, f"/me/messages/{draft['id']}?$select=body")
+    html_body = splice_reply_body((full.get("body") or {}).get("content", ""), body)
+    graph(token, f"/me/messages/{draft['id']}", "PATCH", {"body": {"contentType": "HTML", "content": html_body}})
+    return draft["id"], ("reply" if sender_only else "reply_all"), target["id"]
+
+
+def record(args, draft_id, kind, in_reply_to, sender_only=False):
+    from datetime import datetime, timezone
+    ledger = load_ledger(args.mailbox_dir)
+    ledger[draft_id] = {"kind": kind, "in_reply_to": in_reply_to, "sender_only": sender_only,
+                        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    save_ledger(args.mailbox_dir, ledger)
+
+
+def cmd_draft(token, args):
+    if args.reply_to:
+        draft_id, kind, target = create_reply(token, args, args.reply_to, args.body, args.sender_only)
+        record(args, draft_id, kind, target, args.sender_only)
+        return draft_output(token, args, draft_id, kind, True, args.body, in_reply_to=target)
+    to = [a.strip() for a in args.to.split(",") if a.strip()]
+    if not to:
+        die("a new email needs --to (or use --reply-to <messageId> to reply in a thread)", EXIT_USAGE)
+    d = graph(token, "/me/messages", "POST", {
+        "subject": args.subject or "",
+        "body": {"contentType": "HTML", "content": text_to_html(args.body)},
+        "toRecipients": [{"emailAddress": {"address": a}} for a in to],
+    })
+    record(args, d["id"], "new", None)
+    return draft_output(token, args, d["id"], "new", False, args.body)
+
+
+def owned(args, draft_id):
+    entry = load_ledger(args.mailbox_dir).get(draft_id)
+    if not entry:
+        die("that draft was not created by graph-mail — the owner's own drafts are never revised or deleted",
+            EXIT_NOT_OURS)
+    return entry
+
+
+def bin_draft(token, args, draft_id, strict=True):
+    """Move one of our drafts to Deleted Items (recoverable), and forget it.
+
+    strict=False (revise-draft): the old draft may already be gone — the owner sent
+    or deleted it — and that must not hide the new draft's id from the
+    intern, so a failed move is reported instead of exiting. Returns True
+    when the draft was moved.
+    """
+    try:
+        graph(token, f"/me/messages/{draft_id}/move", "POST", {"destinationId": "deleteditems"}, fatal=strict)
+        moved = True
+    except GraphError:
+        moved = False
+    ledger = load_ledger(args.mailbox_dir)
+    ledger.pop(draft_id, None)
+    save_ledger(args.mailbox_dir, ledger)
+    return moved
+
+
+def cmd_revise_draft(token, args):
+    entry = owned(args, args.draft_id)
+    if entry["kind"] == "new":
+        graph(token, f"/me/messages/{args.draft_id}", "PATCH",
+              {"body": {"contentType": "HTML", "content": text_to_html(args.body)}})
+        return draft_output(token, args, args.draft_id, "new", False, args.body)
+    # A reply is recreated from the message it answers, so the quoted history
+    # is Graph's own again; the superseded draft goes to Deleted Items.
+    sender_only = bool(entry.get("sender_only"))
+    draft_id, kind, target = create_reply(token, args, entry["in_reply_to"], args.body, sender_only)
+    record(args, draft_id, kind, target, sender_only)
+    moved = bin_draft(token, args, args.draft_id, strict=False)
+    out = draft_output(token, args, draft_id, kind, True, args.body, in_reply_to=target)
+    out["replaces"] = args.draft_id
+    if not moved:
+        out["warning"] = ("the previous draft could not be moved to Deleted Items (the owner may have sent or deleted it) — "
+                          "this is now the only draft graph-mail is tracking for the thread")
+    return out
+
+
+def cmd_delete_draft(token, args):
+    owned(args, args.draft_id)
+    bin_draft(token, args, args.draft_id)
+    return {"draft_id": args.draft_id, "deleted": True, "note": "moved to Deleted Items (recoverable)"}
+
+
+def main():
+    p = argparse.ArgumentParser(prog="graph-mail", description="Read-and-draft-only Outlook CLI (no send).")
+    p.add_argument("--mailbox", choices=sorted(MAILBOXES) or None, default=_graph.default_mailbox(MAILBOXES),
+                   help="which mailbox's token cache/config to use (default: the first configured)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("whoami")
+    for name in ("inbox", "sent"):
+        s = sub.add_parser(name)
+        s.add_argument("--days", type=int, default=7)
+        s.add_argument("--top", type=int, default=25)
+    s = sub.add_parser("thread"); s.add_argument("conversation_id")
+    s = sub.add_parser("search"); s.add_argument("query"); s.add_argument("--top", type=int, default=15)
+    s = sub.add_parser("drafts")
+    s.add_argument("--top", type=int, default=50)
+    s.add_argument("--min-age-hours", dest="min_age_hours", type=float, default=24.0)
+    s.add_argument("--stale-only", dest="stale_only", action="store_true")
+    s = sub.add_parser("draft", help="create a draft (reply-all in the thread with --reply-to)")
+    s.add_argument("--to", default=""); s.add_argument("--subject", default="")
+    s.add_argument("--body", required=True); s.add_argument("--reply-to", dest="reply_to", default=None)
+    s.add_argument("--sender-only", dest="sender_only", action="store_true",
+                   help="reply to the sender only instead of reply-all (rare)")
+    s = sub.add_parser("revise-draft", help="replace the owner's text in a draft this tool created; keeps the thread")
+    s.add_argument("draft_id"); s.add_argument("--body", required=True)
+    s = sub.add_parser("delete-draft", help="move a draft this tool created to Deleted Items")
+    s.add_argument("draft_id")
+    args = p.parse_args()
+    if not args.mailbox:
+        die("no mailbox configured — add one with tools/graph-login --mailbox <id> (see README › Outlook)", EXIT_USAGE)
+    _graph.ensure_msal()
+    args.mailbox_dir = MAILBOXES[args.mailbox]
+    token = get_token(args.mailbox_dir)
+    out = {"whoami": cmd_whoami, "inbox": cmd_inbox, "sent": cmd_sent,
+           "thread": cmd_thread, "search": cmd_search, "draft": cmd_draft,
+           "drafts": cmd_drafts, "revise-draft": cmd_revise_draft,
+           "delete-draft": cmd_delete_draft}[args.cmd](token, args)
+    print(json.dumps(out, indent=1))
+
+
+if __name__ == "__main__":
+    main()

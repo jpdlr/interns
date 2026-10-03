@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<defs>
+<radialGradient id="halo" cx="50%" cy="50%" r="50%">
+<stop offset="0%" stop-color="#ff7a59" stop-opacity=".45"/>
+<stop offset="100%" stop-color="#ff7a59" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="o1" cx="38%" cy="32%" r="78%">
+<stop offset="0%" stop-color="#ffe0d1"/>
+<stop offset="50%" stop-color="#ff7a59"/>
+<stop offset="100%" stop-color="#8f2a12"/>
+</radialGradient>
+<radialGradient id="o2" cx="40%" cy="34%" r="78%">
+<stop offset="0%" stop-color="#fff1dd"/>
+<stop offset="55%" stop-color="#ffb27a"/>
+<stop offset="100%" stop-color="#a8541e"/>
+</radialGradient>
+</defs>
+<g transform="translate(128 128)">
+<circle r="96" fill="url(#halo)">
+<animate attributeName="opacity" values=".65;1;.65" dur="8s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</circle>
+<g>
+<animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="10s" repeatCount="indefinite"/>
+<circle cx="-32" cy="0" r="34" fill="url(#o1)">
+<animate attributeName="r" values="34;36;34" dur="5s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</circle>
+<circle cx="36" cy="6" r="23" fill="url(#o2)">
+<animate attributeName="r" values="23;21.5;23" dur="5s" begin="-2.5s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1"/>
+</circle>
+</g>
+</g>
+</svg>

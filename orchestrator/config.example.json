@@ -1,0 +1,52 @@
+{
+  "owner_name": "Sam",
+  "timezone": "Europe/London",
+  "port": 7810,
+  "bind": "127.0.0.1",
+  "api_token": "",
+  "heartbeat_minutes": 5,
+  "standup_cron": "0 7 * * 1-5",
+  "suggest_cron": "0 8 * * 1",
+  "own_domains": ["example.com"],
+  "mailboxes": [],
+  "calendar_mailbox": "",
+  "graph": {
+    "client_id": "",
+    "authority": "organizations"
+  },
+  "mail_triage": {
+    "ignore_from": ["noreply", "no-reply", "notifications?@", "mailer-daemon", "newsletter", "list-"],
+    "ignore_subject": ["unsubscribe"],
+    "vip_from": []
+  },
+  "discord": {
+    "bot_token": "",
+    "guild_id": "",
+    "office_channel_id": "",
+    "avatar_base_url": "",
+    "dry_run": true
+  },
+  "engine": {
+    "model": "",
+    "max_turns": 25
+  },
+  "push": {
+    "vapid_public": "",
+    "vapid_private": "",
+    "subject": "mailto:you@example.com"
+  },
+  "github": {
+    "app_id": "",
+    "installation_id": "",
+    "installation_ids": {},
+    "private_key_path": "",
+    "webhook_secret": "",
+    "reviewer_slug": "code-reviewer",
+    "repositories": ["your-org/your-repo"],
+    "poll_minutes": 2,
+    "api_base_url": "https://api.github.com",
+    "codeops_base_url": "",
+    "codeops_owners": [],
+    "codeops_label": "CodeOps"
+  }
+}

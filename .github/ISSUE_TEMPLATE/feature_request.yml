@@ -1,0 +1,16 @@
+name: Feature idea
+description: A new capability for the crew or the app
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What do you want an intern (or the app) to do?
+      description: Describe the need in your own words, the way you'd describe a hire.
+    validations:
+      required: true
+  - type: textarea
+    id: guardrails
+    attributes:
+      label: Anything it must never do?
+      description: e.g. send, publish or delete without asking.

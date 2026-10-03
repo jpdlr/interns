@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "Interns",
+    "slug": "interns",
+    "scheme": "interns",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0d0f14",
+    "primaryColor": "#8b5cf6",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "io.github.jpdlr.interns"
+    },
+    "android": {
+      "package": "io.github.jpdlr.interns",
+      "adaptiveIcon": {
+        "backgroundColor": "#0d0f14",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/favicon.png",
+      "name": "Interns",
+      "shortName": "Interns",
+      "themeColor": "#0d0f14",
+      "backgroundColor": "#0d0f14",
+      "display": "standalone",
+      "startUrl": "/",
+      "orientation": "portrait",
+      "lang": "en",
+      "description": "Your AI intern crew."
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160,
+          "resizeMode": "contain",
+          "backgroundColor": "#0d0f14"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
