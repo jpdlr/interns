@@ -258,6 +258,9 @@ const messages = {
       text: "There are three worth a look. **Vet Congress** (12–14 Nov) has the most decision-makers, but booths are pricey and the floor plan suggests poor traffic on day two. **AgriTech Expo** (28 Oct) is smaller, cheaper and two of your leads are attending. **Smart Clinics Summit** is online-only this year, which makes it cheap but hard to stand out at. If I had to pick one, I'd do AgriTech for leads and send a brochure to Vet Congress instead of a booth." },
     { id: "m6", intern: "milo", author: "jp", text: "And the one next month?", ts: iso(1000e3), surface: "app" },
     { id: "m7", intern: "milo", author: "intern", text: "Skip it: small, mostly suppliers, none of your leads are going.", ts: iso(900e3), surface: "system" },
+    { id: "m8", intern: "milo", author: "jp", text: "Tighten my bio?", ts: iso(800e3), surface: "app" },
+    { id: "m9", intern: "milo", author: "intern", ts: iso(700e3), surface: "system",
+      text: "Two versions. Both keep your best line.\n\n**⭐ My pick — 112 chars**\n```\nDesign • Coffee • Bikes\nUsually sketching, riding, or fixing something.\nCape Town\n```\nScannable header, your line, home.\n\n**Shorter — 74 chars**\n```\nDesigner. Usually sketching, riding, or fixing something.\n```\n\nSay which and I'll update the profile." },
   ],
   nia: [
     { id: "m3", intern: "nia", author: "intern", text: "Briefing on the city tender is ready. **Short version:** the deadline moved to the 9th.", ts: iso(7200e3), surface: "discord" },

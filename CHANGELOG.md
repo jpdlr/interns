@@ -6,6 +6,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Writing cards.** Text meant to be pasted somewhere (a bio, caption, post or email) shows as
+  a clean card in the reading font, wrapped, with Copy and Edit, not as a monospace code box.
+  Labelled alternatives (`**My pick — 138 chars**` above each block) share one card behind
+  numbered tabs. Edit opens the text to change it, then copy it or send it back to the
+  intern. Interns are told to use ```` ```writing ```` blocks for this.
 - **A new hiring screen.** Describe the job, pick a starter from a card grid, or start from
   scratch. You then build the candidate:
   - a face picked from a strip, with the name and role edited in place;

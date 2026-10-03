@@ -23,6 +23,7 @@ import { InternFace } from "./InternFace";
 import { Mermaid } from "./Mermaid";
 import { SvgBlock } from "./SvgBlock";
 import { Text, type TextVariant } from "./Text";
+import { isWriting, parseWritingLabel, WritingBlock, type WritingLabel, type WritingOption } from "./Writing";
 
 /**
  * Put text on the clipboard. Web has the async clipboard API; native RN has
@@ -57,8 +58,8 @@ function CodeFence({ source, lang, palette }: { source: string; lang: string; pa
   return (
     <View style={[styles.fence, { borderColor: palette.rule, backgroundColor: palette.codeBg }]}>
       <View style={styles.fenceBar}>
-        <Text variant="label" color={palette.dim}>
-          {lang || "code"}
+        <Text variant="caption" color={palette.dim}>
+          {lang || "Code"}
         </Text>
         <Pressable onPress={() => void onCopy()} accessibilityRole="button" accessibilityLabel={copied ? "Copied" : Platform.OS === "web" ? "Copy code" : "Share code"} hitSlop={8} style={styles.fenceAction}>
           {copied ? <CheckIcon size={15} color={palette.dim} /> : <CopyIcon size={15} color={palette.dim} />}
@@ -405,10 +406,16 @@ function MarkdownImpl({ body, variant = "body", tone = "default", surface }: Mar
   const { colors } = useAppTheme();
   const palette = palettes(colors)[tone];
   const chartSurface = surface ?? (tone === "onAccent" ? colors.accent : colors.surfaceAlt);
-  const blocks: React.ReactNode[] = [];
+  // Writing (writing cards) stays a plain record until the end, when labelled
+  // versions in a row become one card with tabs.
+  const blocks: (React.ReactNode | WritingOption)[] = [];
   const lines = body.replace(/\r\n/g, "\n").split("\n");
   let fence: string[] | null = null;
   let fenceLang = "";
+  /** the label line straight above the open fence ("**My pick — 138 chars**") */
+  let fenceLabel: WritingLabel | null = null;
+  /** lines written straight under a writing fence belong to that version */
+  let notesFor: WritingOption | null = null;
 
   /**
    * Close a fence. Two languages render natively instead of as code: a
@@ -474,6 +481,14 @@ function MarkdownImpl({ body, variant = "body", tone = "default", surface }: Mar
       fence = null;
       return;
     }
+    if (isWriting(lang, source)) {
+      const option: WritingOption = { key, source, label: fenceLabel, notes: [] };
+      blocks.push(option);
+      notesFor = option;
+      fence = null;
+      return;
+    }
+    if (fenceLabel) blocks.push(<View key={`${key}-label`} style={styles.paragraph}><Inline line={`**${[fenceLabel.title, fenceLabel.meta].filter(Boolean).join(" — ")}**`} palette={palette} variant={variant} /></View>);
     blocks.push(<CodeFence key={key} source={source} lang={lang} palette={palette} />);
     fence = null;
   };
@@ -485,12 +500,28 @@ function MarkdownImpl({ body, variant = "body", tone = "default", surface }: Mar
       else {
         fence = [];
         fenceLang = line.trim().slice(3).trim().split(/\s+/)[0] ?? "";
+        notesFor = null;
+        // A label right above the fence names this version; it moves into the card.
+        fenceLabel = index > 0 ? parseWritingLabel(lines[index - 1]) : null;
+        if (fenceLabel && (blocks.at(-1) as { key?: unknown } | undefined)?.key === String(index - 1)) blocks.pop();
+        else fenceLabel = null;
       }
       continue;
     }
     if (fence) {
       fence.push(line);
       continue;
+    }
+    // (set inside pushFence, which TypeScript's narrowing can't see)
+    const noteTarget = notesFor as WritingOption | null;
+    if (noteTarget) {
+      // Under a writing fence, up to the next blank line: a note on that version.
+      const structural = /^\s*([-*+]\s|\d+[.)]\s|>|#{1,3}\s|\|)/.test(line) || parseWritingLabel(line);
+      if (line.trim() && !structural) {
+        noteTarget.notes.push(line);
+        continue;
+      }
+      notesFor = null;
     }
 
     // An image on its own line: ![alt](https://…) — remote http(s) only.
@@ -581,7 +612,43 @@ function MarkdownImpl({ body, variant = "body", tone = "default", surface }: Mar
 
   if (fence !== null) pushFence("fence-tail");
 
-  return <View>{groupRuleChips(blocks)}</View>;
+  const renderNote = (line: string, key: string) => (
+    <View key={key} style={styles.paragraph}>
+      <Inline line={line} palette={palette} variant={variant} />
+    </View>
+  );
+  return <View>{groupRuleChips(groupWriting(blocks, renderNote))}</View>;
+}
+
+const isWritingOption = (b: unknown): b is WritingOption => typeof b === "object" && b !== null && "source" in b && "notes" in b && !React.isValidElement(b);
+
+/**
+ * Writing versions become cards. Two or more labelled versions in a row
+ * (blank lines between them allowed) share one card with tabs.
+ */
+function groupWriting(blocks: (React.ReactNode | WritingOption)[], renderNote: (line: string, key: string) => React.ReactNode): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  const isGap = (b: unknown) => React.isValidElement(b) && (b.props as { style?: unknown }).style === styles.gap;
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    if (!isWritingOption(block)) {
+      out.push(block as React.ReactNode);
+      continue;
+    }
+    const run = [block];
+    let j = i + 1;
+    while (block.label) {
+      let k = j;
+      while (k < blocks.length && isGap(blocks[k])) k++;
+      const next = blocks[k];
+      if (!isWritingOption(next) || !next.label) break;
+      run.push(next);
+      j = k + 1;
+    }
+    out.push(<WritingBlock key={block.key} options={run} renderNote={renderNote} />);
+    i = j - 1;
+  }
+  return out;
 }
 
 /**
