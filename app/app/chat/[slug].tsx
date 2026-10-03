@@ -17,7 +17,7 @@ import { haptic } from "../../src/haptics";
 import { useReducedMotion } from "../../src/motion";
 import { copyText, Markdown } from "../../src/ui/Markdown";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { Attachment, Card, CardAction, Intern, Message, PageEvent, PageHeader, Room, TaskActivity, UploadableFile } from "../../src/api";
+import type { Attachment, Card, CardAction, Intern, Message, PageEvent, PageHeader, Reaction, Room, TaskActivity, UploadableFile } from "../../src/api";
 import { scaledFont } from "../../src/theme";
 import { isRoomKey, mentionQueryAt, useCrew } from "../../src/crew";
 import { clearDraft, loadDraft, saveDraft } from "../../src/drafts";
@@ -40,6 +40,8 @@ import { MessageProvider } from "../../src/ui/MessageContext";
 import { extractPullRequestReferences, PullRequestPreviewCard } from "../../src/ui/PullRequestPreview";
 import { extractResourceReferences, ResourceLinkPreviewCard } from "../../src/ui/ResourceLinkPreview";
 import { QuickReplyChips, suggestQuickReplies } from "../../src/ui/QuickReplies";
+import { ReactionBadge, ReactionBar, ReactionToast, reactionInfo } from "../../src/ui/Reactions";
+import { DIALS } from "../../src/style";
 import { EmptyState, ErrorNote, Loading, Screen } from "../../src/ui/Screen";
 import { Text } from "../../src/ui/Text";
 import { ThinkingIndicator } from "../../src/ui/ThinkingIndicator";
@@ -101,6 +103,9 @@ export default function ChatScreen() {
   const [menuFor, setMenuFor] = useState<Message | null>(null);
   const [forwardFor, setForwardFor] = useState<Message | null>(null);
   const [menuNote, setMenuNote] = useState<string | null>(null);
+  /** the intern's "Noted. I'll keep it shorter." after the owner reacts (teach by reacting) */
+  const [reactToast, setReactToast] = useState<{ text: string; faceId?: string; undo?: () => void } | null>(null);
+  const dismissReactToast = useCallback(() => setReactToast(null), []);
   /** in-thread search */
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -680,6 +685,56 @@ export default function ChatScreen() {
     setMenuFor(message);
   }, []);
 
+  /**
+   * The owner reacts to an intern's message (null takes it back). The intern
+   * acknowledges it; when the reactions add up it moves a personality dial
+   * and says so, with Undo.
+   */
+  const reactToMessage = useCallback(
+    async (target: Message, reaction: Reaction | null) => {
+      setMenuFor(null);
+      const before = target.reaction ?? null;
+      const put = (m: Message) => setMessages((current) => current.map((x) => (x.id === m.id ? m : x)));
+      put({ ...target, reaction });
+      haptic("tap");
+      try {
+        const result = await api.react(target.id, reaction);
+        put(result.message);
+        if (!reaction) return setReactToast(null);
+        const faceId = speakerOf(target)?.faceId;
+        const change = result.change;
+        if (change) {
+          const dial = DIALS.find((d) => d.key === change.dial);
+          setReactToast({
+            text: `${result.card?.title ?? "Noted"}. ${dial?.title ?? change.dial} is now ${dial?.steps[change.to_value - 1] ?? change.to_value}.`,
+            faceId,
+            undo: () => {
+              setReactToast(null);
+              void api.undoStyleChange(change.intern, change.id).catch((e: unknown) => setMenuNote(friendlyError(e).message));
+            },
+          });
+        } else {
+          setReactToast({
+            text: reactionInfo(reaction).ack,
+            faceId,
+            undo: () => {
+              setReactToast(null);
+              put({ ...result.message, reaction: before });
+              void api.react(target.id, before).then((r) => put(r.message)).catch((e: unknown) => setMenuNote(friendlyError(e).message));
+            },
+          });
+        }
+        // "Missed the point": the composer is ready for what she missed.
+        if (reaction === "missed") setReplyingTo(target);
+      } catch (e) {
+        put({ ...target, reaction: before });
+        setMenuNote(friendlyError(e).message);
+        setTimeout(() => setMenuNote(null), 2200);
+      }
+    },
+    [api, speakerOf],
+  );
+
   const runCardAction = useCallback(
     (card: Card, action: CardAction, note?: string) => api.runCardAction(card.id, action.id, note),
     [api],
@@ -847,6 +902,9 @@ export default function ChatScreen() {
             onRetry={isFailed ? retryPending : undefined}
           />
           </MessageProvider>
+          {message.reaction && message.author === "intern" ? (
+            <ReactionBadge reaction={message.reaction} indent={quickReplyIndent} onPress={() => openMenu(message)} />
+          ) : null}
           {pullRequests.map((reference) => (
             <PullRequestPreviewCard
               key={`${reference.repository}#${reference.number}`}
@@ -1133,6 +1191,7 @@ export default function ChatScreen() {
               },
             ]}
           >
+            {reactToast ? <ReactionToast text={reactToast.text} faceId={reactToast.faceId} onUndo={reactToast.undo} onDone={dismissReactToast} /> : null}
             {dragging ? (
               <View style={[styles.dropHint, { borderColor: colors.info, backgroundColor: colors.accentSoft }]}>
                 <Text variant="subtle" color={colors.info} center>
@@ -1228,9 +1287,15 @@ export default function ChatScreen() {
         <Pressable style={[styles.sheetBackdrop, { backgroundColor: colors.overlay }]} onPress={() => setMenuFor(null)} accessibilityLabel="Close message menu">
           <Pressable style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border, paddingBottom: Math.max(insets.bottom, space.lg) }]} onPress={() => {}}>
             <View style={styles.sheetHandle} />
-            <Text variant="caption" numberOfLines={2} style={styles.sheetPreview}>
-              {menuFor ? (menuFor.text.trim() ? cleanMessagePreview(menuFor.text) : menuFor.attachments?.length ? `📎 ${menuFor.attachments.map((a) => a.name).join(", ")}` : "") : ""}
-            </Text>
+            {menuFor && menuFor.author === "intern" && !pending.some((p) => p.message.id === menuFor.id) ? (
+              <ReactionBar selected={menuFor.reaction} onPick={(reaction) => void reactToMessage(menuFor, reaction)} />
+            ) : null}
+            {/* padding on the wrapper: on a clamped line the web shows the next line inside the padding */}
+            <View style={styles.sheetPreview}>
+              <Text variant="caption" numberOfLines={2}>
+                {menuFor ? (menuFor.text.trim() ? cleanMessagePreview(menuFor.text) : menuFor.attachments?.length ? `📎 ${menuFor.attachments.map((a) => a.name).join(", ")}` : "") : ""}
+              </Text>
+            </View>
             {menuFor && pending.some((p) => p.failed && p.message.id === menuFor.id) ? (
               <>
                 <SheetItem label="Try again" onPress={() => void menuAction("retry")} />

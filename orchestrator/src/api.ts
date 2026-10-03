@@ -10,6 +10,7 @@ import * as path from "node:path";
 import { Readable } from "node:stream";
 import { notFoundPage, resolvePage } from "./appshell.js";
 import { DEFAULT_STYLE, StyleSchema } from "./style.js";
+import { learnedView, ownerSetStyle, reactTo, ReactionError, undoStyleChange } from "./reactions.js";
 import { registerConnectorRoutes, unknownMailboxes, type ConnectorService } from "./connectors.js";
 import { z } from "zod";
 import type { ApprovalService } from "./approvals.js";
@@ -53,6 +54,8 @@ import {
   InternManifestSchema,
   NotifyLevelSchema,
   PageKindSchema,
+  REACTIONS,
+  ReactionSchema,
   RuleTypeSchema,
   type Rule,
   type Task,
@@ -369,6 +372,29 @@ export async function startApi(deps: {
     const msg = db.setPinned(req.params.id, body.data.pinned);
     if (!msg) return reply.code(404).send({ error: "no such message" });
     return msg;
+  });
+
+  // ---- reactions: the owner's verdict on an intern's message; enough of one kind moves a dial (reactions.ts)
+  app.post<{ Params: { id: string } }>("/messages/:id/reaction", async (req, reply) => {
+    const body = z.object({ reaction: ReactionSchema.nullable() }).safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: "reaction must be one of " + REACTIONS.join(", ") + ", or null" });
+    try {
+      return reactTo(db, registry, req.params.id, body.data.reaction);
+    } catch (err) {
+      if (err instanceof ReactionError) return reply.code(err.status).send({ error: err.message });
+      throw err;
+    }
+  });
+
+  app.get<{ Params: { slug: string } }>("/interns/:slug/learned", async (req, reply) => {
+    if (!registry.get(req.params.slug)) return reply.code(404).send({ error: "no such intern" });
+    return learnedView(db, req.params.slug);
+  });
+
+  app.post<{ Params: { slug: string; id: string } }>("/interns/:slug/learned/:id/undo", async (req, reply) => {
+    const change = db.getStyleChange(req.params.id);
+    if (!change || change.intern !== req.params.slug) return reply.code(404).send({ error: "no such change" });
+    return undoStyleChange(db, registry, change.id);
   });
 
   app.get<{ Params: { slug: string } }>("/interns/:slug/pins", async (req, reply) => {
@@ -690,6 +716,7 @@ export async function startApi(deps: {
     // though `name` (and hence what a fresh slugify() would produce) may differ.
     registry.save(manifest, slug);
     db.upsertIntern({ slug, name: manifest.name, role: manifest.role, icon: manifest.icon });
+    if (patch.style) ownerSetStyle(db, slug, { ...DEFAULT_STYLE, ...existing.style }, { ...DEFAULT_STYLE, ...manifest.style });
 
     // A raised limit gives work held at the old one room to carry on now.
     if (patch.guardrails?.daily_token_cap !== undefined) {

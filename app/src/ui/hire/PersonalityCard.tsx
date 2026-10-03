@@ -67,12 +67,23 @@ export function PersonalityCard({
 }
 
 /** The four dials and a sample reply that follows them. Also on the profile's Personality editor. */
-export function StyleDials({ faceId, style, onStyle }: { faceId: string; style: Style; onStyle: (s: Style) => void }) {
+export function StyleDials({
+  faceId,
+  style,
+  onStyle,
+  badges,
+}: {
+  faceId: string;
+  style: Style;
+  onStyle: (s: Style) => void;
+  /** beside a dial's value, e.g. "from your reactions" */
+  badges?: Partial<Record<keyof Style, React.ReactNode>>;
+}) {
   const { colors } = useAppTheme();
   return (
     <>
       {DIALS.map((d) => (
-        <Dial key={d.key} title={d.title} low={d.low} high={d.high} steps={d.steps} value={style[d.key]} onChange={(v) => onStyle({ ...style, [d.key]: v })} />
+        <Dial key={d.key} title={d.title} low={d.low} high={d.high} steps={d.steps} value={style[d.key]} onChange={(v) => onStyle({ ...style, [d.key]: v })} badge={badges?.[d.key]} />
       ))}
       <View style={styles.sample} accessibilityLabel={`Sample reply: ${sampleReply(style)}`}>
         <Text variant="caption">You: Anything I need to know?</Text>

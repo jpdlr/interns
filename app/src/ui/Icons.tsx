@@ -104,6 +104,22 @@ export const PinIcon = (p: IconProps) => (
   <Icon {...p} d="M9 4.5h6M10 4.5v5.2l-3 3.3h10l-3-3.3V4.5M12 13v6.5" />
 );
 
+// Reactions (teach by reacting): Perfect, Too long, Too short, Too formal, Too casual, Missed the point.
+export const ThumbsUpIcon = (p: IconProps) => (
+  <Icon {...p} d="M7.5 10.5v8.9M7.5 10.5l3.6-6.3c.4-.7 1.3-1 2-.6.6.3.9 1 .8 1.7l-.6 3.9h4.9c1.2 0 2.1 1.1 1.9 2.3l-1.2 6.3c-.2.9-1 1.6-1.9 1.6H4.8c-.7 0-1.3-.6-1.3-1.3v-6.4c0-.7.6-1.3 1.3-1.3h2.7Z" />
+);
+export const ShrinkIcon = (p: IconProps) => <Icon {...p} d="M4 14h6v6M20 10h-6V4M14 10l6.5-6.5M3.5 20.5 10 14" />;
+export const GrowIcon = (p: IconProps) => <Icon {...p} d="M14 4h6v6M10 20H4v-6M20 4l-6.5 6.5M4 20l6.5-6.5" />;
+export const BriefcaseIcon = (p: IconProps) => (
+  <Icon {...p} d="M8.5 7V5.5c0-.8.7-1.5 1.5-1.5h4c.8 0 1.5.7 1.5 1.5V7M4.5 7h15c.8 0 1.5.7 1.5 1.5V18c0 .8-.7 1.5-1.5 1.5h-15c-.8 0-1.5-.7-1.5-1.5V8.5C3 7.7 3.7 7 4.5 7ZM3 12.5h18" />
+);
+export const SmileIcon = (p: IconProps) => (
+  <Icon {...p} d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM8.5 14.5s1.3 1.8 3.5 1.8 3.5-1.8 3.5-1.8M9 9.5h.01M15 9.5h.01" />
+);
+export const TargetIcon = (p: IconProps) => (
+  <Icon {...p} d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM17 12a5 5 0 1 1-10 0 5 5 0 0 1 10 0ZM13 12a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z" />
+);
+
 /**
  * Official Discord "Clyde" mark, single-color, drawn from the brand's public
  * SVG path data (fill, not stroke — unlike the line icons above). Small and

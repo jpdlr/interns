@@ -121,6 +121,7 @@ posted until **Publish review** is pressed.
 | `GET/POST /interns/:key/messages` | `:key` is an intern slug **or** a room id — same thread API for both |
 | `POST /suggest/run` (202) · `GET /suggest/status` · `GET /suggest/history` | start the coordinator's suggestion pass in the background; poll its status; past proposals + decisions |
 | `POST /messages/:id/pin {pinned}` · `GET /interns/:key/pins` | pin a message to the top of a thread |
+| `POST /messages/:id/reaction {reaction}` · `GET /interns/:slug/learned` · `POST /interns/:slug/learned/:id/undo` | react to an intern's message (`perfect`, `too_long`, `too_short`, `too_formal`, `too_casual`, `missed`, or `null`); 4 of one kind in its last 10 messages move its Length or Tone dial (`src/reactions.ts`) |
 | `GET/PUT /rooms/:id/scratchpad` | the room's shared markdown pad (`append: true` adds; `author` leaves a note in the thread) |
 | `GET /reports/spend?days=30` | per-intern-per-day spend + per-conversation spend (`run_spend`), with display names |
 | `GET /events` | SSE: `message`, `card`, `card_state` |

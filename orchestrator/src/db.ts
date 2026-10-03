@@ -39,6 +39,7 @@ import {
   Page,
   PageKind,
   PageSchema,
+  Reaction,
   Rule,
   RuleSchema,
   RuleType,
@@ -60,6 +61,23 @@ export interface PushLogEntry {
   delivery: PushDelivery;
   summary_id: string | null;
   opened_at: string | null;
+}
+
+/** A personality dial moved because of the owner's reactions (reactions.ts). */
+export interface StyleChange {
+  id: string;
+  intern: string;
+  dial: "tone" | "length";
+  from_value: number;
+  to_value: number;
+  /** the reaction that added up, e.g. "too_long" */
+  reaction: Reaction;
+  /** how many of them */
+  reactions: number;
+  /** true when the intern asked first and the owner said yes */
+  asked: boolean;
+  created_at: string;
+  undone_at: string | null;
 }
 
 export interface DraftEdit {
@@ -397,6 +415,25 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS idx_draft_edits_intern ON draft_edits(intern, learned_at);
   `,
+  // Teach by reacting (reactions.ts): the owner's one-tap verdict on an
+  // intern's message, and the personality-dial moves those verdicts led to.
+  `
+  ALTER TABLE messages ADD COLUMN reaction TEXT;
+  ALTER TABLE messages ADD COLUMN reacted_at TEXT;
+  CREATE TABLE IF NOT EXISTS style_changes (
+    id TEXT PRIMARY KEY,
+    intern TEXT NOT NULL,
+    dial TEXT NOT NULL,
+    from_value INTEGER NOT NULL,
+    to_value INTEGER NOT NULL,
+    reaction TEXT NOT NULL,
+    reactions INTEGER NOT NULL,
+    asked INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    undone_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_style_changes_intern ON style_changes(intern, created_at);
+  `,
 ];
 
 interface PageRow {
@@ -649,7 +686,7 @@ export class Db {
    * surfaces can render them without a second fetch.
    */
   addMessage(
-    input: Omit<Message, "id" | "ts" | "attachments" | "speaker" | "reply_to" | "pinned" | "cause"> & { id?: string; ts?: string; speaker?: string | null; reply_to?: string | null; cause?: Message["cause"]; attachmentIds?: string[] },
+    input: Omit<Message, "id" | "ts" | "attachments" | "speaker" | "reply_to" | "pinned" | "reaction" | "cause"> & { id?: string; ts?: string; speaker?: string | null; reply_to?: string | null; cause?: Message["cause"]; attachmentIds?: string[] },
   ): Message {
     const { attachmentIds = [], ...rest } = input;
     // A caller may pick the id up front so things that belong to the message
@@ -1712,6 +1749,62 @@ export class Db {
 
   countDraftEdits(intern: string, sinceIso: string): number {
     return (this.sqlite.prepare("SELECT COUNT(*) AS n FROM draft_edits WHERE intern = ? AND created_at >= ?").get(intern, sinceIso) as { n: number }).n;
+  }
+
+  // ------------------------------------------------------------ reactions
+
+  /** The owner's reaction to a message (null clears it); re-emitted so open threads show the badge. */
+  setReaction(id: string, reaction: Reaction | null, now: Date = new Date()): Message | undefined {
+    this.sqlite.prepare("UPDATE messages SET reaction = ?, reacted_at = ? WHERE id = ?").run(reaction, reaction ? now.toISOString() : null, id);
+    const msg = this.getMessage(id);
+    if (msg) this.bus.emit("message", msg);
+    return msg;
+  }
+
+  /** An intern's own latest messages (any thread), newest first, with their reactions. */
+  latestBySpeaker(speaker: string, limit: number): { id: string; text: string; reaction: Reaction | null; reacted_at: string | null }[] {
+    return this.sqlite
+      .prepare(
+        `SELECT id, text, reaction, reacted_at FROM messages
+         WHERE author = 'intern' AND COALESCE(speaker, intern) = ?
+         ORDER BY ts DESC LIMIT ?`,
+      )
+      .all(speaker, limit) as { id: string; text: string; reaction: Reaction | null; reacted_at: string | null }[];
+  }
+
+  /** Reactions to an intern's messages since a time, oldest first. */
+  reactionsSince(speaker: string, sinceIso: string): { id: string; text: string; reaction: Reaction; reacted_at: string }[] {
+    return this.sqlite
+      .prepare(
+        `SELECT id, text, reaction, reacted_at FROM messages
+         WHERE author = 'intern' AND COALESCE(speaker, intern) = ? AND reaction IS NOT NULL AND reacted_at >= ?
+         ORDER BY reacted_at ASC`,
+      )
+      .all(speaker, sinceIso) as { id: string; text: string; reaction: Reaction; reacted_at: string }[];
+  }
+
+  addStyleChange(input: Omit<StyleChange, "id" | "undone_at">): StyleChange {
+    const change: StyleChange = { ...input, id: randomUUID(), undone_at: null };
+    this.sqlite
+      .prepare("INSERT INTO style_changes (id, intern, dial, from_value, to_value, reaction, reactions, asked, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(change.id, change.intern, change.dial, change.from_value, change.to_value, change.reaction, change.reactions, change.asked ? 1 : 0, change.created_at);
+    return change;
+  }
+
+  getStyleChange(id: string): StyleChange | undefined {
+    const row = this.sqlite.prepare("SELECT * FROM style_changes WHERE id = ?").get(id) as (Omit<StyleChange, "asked"> & { asked: number }) | undefined;
+    return row ? { ...row, asked: row.asked === 1 } : undefined;
+  }
+
+  listStyleChanges(intern: string, limit = 20): StyleChange[] {
+    const rows = this.sqlite
+      .prepare("SELECT * FROM style_changes WHERE intern = ? ORDER BY created_at DESC LIMIT ?")
+      .all(intern, limit) as (Omit<StyleChange, "asked"> & { asked: number })[];
+    return rows.map((r) => ({ ...r, asked: r.asked === 1 }));
+  }
+
+  markStyleChangeUndone(id: string, now: Date = new Date()): void {
+    this.sqlite.prepare("UPDATE style_changes SET undone_at = ? WHERE id = ? AND undone_at IS NULL").run(now.toISOString(), id);
   }
 
   // ------------------------------------------------------------------ kv
