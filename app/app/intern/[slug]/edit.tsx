@@ -19,6 +19,7 @@ import { radius, scaledFont, space, useAppTheme } from "../../../src/theme";
 import { Group, Row, Switch } from "../../../src/ui/Grouped";
 import { Flash, GrowingInput } from "../../../src/ui/GrowingInput";
 import { CheckIcon, TrashIcon } from "../../../src/ui/Icons";
+import { ToolIcon } from "../../../src/ui/ToolIcon";
 import { SchedulePicker } from "../../../src/ui/SchedulePicker";
 import { ErrorNote, Loading, Screen } from "../../../src/ui/Screen";
 import { Text } from "../../../src/ui/Text";
@@ -235,7 +236,7 @@ export default function InternEditor() {
           ) : null}
 
           {section === "tools" ? (
-            <Group footer="Mail is always drafts-only: nothing is sent without you. GitHub and builds are granted by the coordinator, not here.">
+            <Group footer="Mail is always drafts-only: nothing is sent without you. GitHub is given to the reviewer you pick in Settings › Connectors; builds are granted by the coordinator.">
               {tools.map((tool) => {
                 const on = form.tools.includes(tool);
                 const info = TOOL_INFO[tool];
@@ -243,6 +244,7 @@ export default function InternEditor() {
                   <Row
                     key={tool}
                     label={info?.label ?? tool}
+                    icon={<ToolIcon tool={tool} />}
                     detail={info?.detail}
                     right={<Switch label={info?.label ?? tool} value={on} onChange={() => update({ tools: on ? form.tools.filter((t) => t !== tool) : [...form.tools, tool] })} />}
                   />

@@ -16,6 +16,7 @@ import type { GithubConnector, Intern } from "../../src/api";
 import { useSettings } from "../../src/settings";
 import { radius, scaledFont, space, useAppTheme } from "../../src/theme";
 import { Button } from "../../src/ui/Button";
+import { BrandLogo } from "../../src/ui/BrandLogo";
 import { Group, Row, Switch } from "../../src/ui/Grouped";
 import { CheckIcon } from "../../src/ui/Icons";
 import { EmptyState, ErrorNote, Loading, Screen } from "../../src/ui/Screen";
@@ -151,7 +152,7 @@ export default function GithubConnectorScreen() {
           <>
             {github.app ? (
               <Group title="App">
-                <Row label={github.app.name} detail={github.app.owner ? `Owned by ${github.app.owner}` : undefined} value="Open" onPress={() => void Linking.openURL(github.app!.html_url)} />
+                <Row label={github.app.name} icon={<BrandLogo brand="github" size={24} />} detail={github.app.owner ? `Owned by ${github.app.owner}` : undefined} value="Open" onPress={() => void Linking.openURL(github.app!.html_url)} />
               </Group>
             ) : null}
 

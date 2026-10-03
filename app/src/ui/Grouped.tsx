@@ -44,6 +44,7 @@ export function Row({
   onPress,
   destructive,
   right,
+  icon,
   accessibilityLabel,
 }: {
   label: string;
@@ -55,11 +56,14 @@ export function Row({
   destructive?: boolean;
   /** custom right side (a switch); replaces value + chevron */
   right?: React.ReactNode;
+  /** a logo or glyph before the label (a product's logo: BrandLogo) */
+  icon?: React.ReactNode;
   accessibilityLabel?: string;
 }) {
   const { colors } = useAppTheme();
   const body = (
     <>
+      {icon ? <View style={styles.rowIcon}>{icon}</View> : null}
       <View style={styles.rowText}>
         <Text variant="body" color={destructive ? colors.danger : colors.text}>
           {label}
@@ -165,6 +169,7 @@ const styles = StyleSheet.create({
   separator: { height: StyleSheet.hairlineWidth, marginLeft: space.lg },
   row: { flexDirection: "row", alignItems: "center", gap: space.md, paddingHorizontal: space.lg, paddingVertical: space.md, minHeight: 50 },
   rowText: { flex: 1, gap: 2 },
+  rowIcon: { width: 28, alignItems: "center", justifyContent: "center" },
   rowRight: { flexDirection: "row", alignItems: "center", gap: space.xs, maxWidth: "55%" },
   value: { flexShrink: 1, textAlign: "right" },
   footer: { paddingHorizontal: space.md },

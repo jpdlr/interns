@@ -17,7 +17,8 @@ import { Button } from "../../src/ui/Button";
 import { ConnectionPill } from "../../src/ui/ConnectionPill";
 import { githubSummary, outlookSummary } from "../../src/ui/ConnectorCard";
 import { Group, Row, Segmented, Switch } from "../../src/ui/Grouped";
-import { CheckIcon } from "../../src/ui/Icons";
+import { BrandLogo } from "../../src/ui/BrandLogo";
+import { BulbIcon, CheckIcon } from "../../src/ui/Icons";
 import { ErrorNote, Screen, ScreenTitle } from "../../src/ui/Screen";
 import { Text } from "../../src/ui/Text";
 
@@ -319,9 +320,9 @@ function ConnectorsGroup() {
   const github = overview ? githubSummary(overview.github) : null;
   return (
     <Group title="Connectors" footer="The tools your interns work in. Mail stays drafts and reviews stay proposals until you approve them.">
-      <Row label="Outlook" detail={outlook?.text} onPress={() => router.push("/connectors/outlook" as never)} />
-      <Row label="GitHub" detail={github?.text} onPress={() => router.push("/connectors/github" as never)} />
-      <Row label="Something else" onPress={() => router.push("/connectors" as never)} />
+      <Row label="Outlook" icon={<BrandLogo brand="outlook" size={24} />} detail={outlook?.text} onPress={() => router.push("/connectors/outlook" as never)} />
+      <Row label="GitHub" icon={<BrandLogo brand="github" size={24} />} detail={github?.text} onPress={() => router.push("/connectors/github" as never)} />
+      <Row label="Something else" icon={<BulbIcon size={22} />} onPress={() => router.push("/connectors" as never)} />
     </Group>
   );
 }

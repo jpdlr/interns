@@ -38,6 +38,14 @@ it with `INTERNS_HOME=$(mktemp -d)`.
   comments that say *why*. Run `npm run typecheck` in both packages before you push.
 - **No secrets in the repo.** Fixtures use `example.com`-style addresses and made-up
   people.
+- **Real logos for real products.** Anything that is a product (a connector, a tool an
+  intern uses, a service like Discord) shows its own logo, never a stand-in glyph. Take
+  it from [svgl.app](https://svgl.app):
+  `npm run gen:brands -- fetch <brand>=<svgl-file>[:<svgl-dark-file>]` in `app/`. You can
+  find file names with `https://api.svgl.app?search=<name>`. This stores the SVG in
+  `app/assets/brands/` and regenerates `src/brands.generated.ts`. Then use
+  `<BrandLogo brand="…" />`, and `TOOL_BRAND` for tools. Generic actions (files, the
+  web, a list) keep the glyphs in `Icons.tsx`.
 
 ## Pull requests
 

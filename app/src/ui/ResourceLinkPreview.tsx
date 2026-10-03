@@ -1,6 +1,7 @@
 import React from "react";
 import { Linking, Pressable, StyleSheet, View } from "react-native";
 import { radius, space, useAppTheme } from "../theme";
+import { BrandLogo, type Brand } from "./BrandLogo";
 import { useThreadIndent } from "./Bubble";
 import { Text } from "./Text";
 
@@ -8,6 +9,8 @@ export type ResourceKind = "email" | "deployment" | "clickup" | "document" | "ca
 
 export interface ResourceReference {
   kind: ResourceKind;
+  /** the product it lives in, when it has a logo (shown instead of the kind label) */
+  brand: Brand | null;
   url: string;
   title: string;
   detail: string;
@@ -35,6 +38,24 @@ function classify(url: URL): ResourceKind | null {
   return null;
 }
 
+/** Which product a link opens in — its logo stands in for the kind label. svgl.app has no Google Docs or CodeOps logo. */
+export function brandFor(url: URL, kind: ResourceKind): Brand | null {
+  const host = url.hostname.toLowerCase();
+  const path = url.pathname.toLowerCase();
+  if (host.endsWith("clickup.com")) return "clickup";
+  if (host.includes("calendar.google")) return "google-calendar";
+  if (host.includes("docs.google")) return path.startsWith("/spreadsheets") ? "google-sheets" : path.startsWith("/presentation") ? "google-slides" : null;
+  if (host.includes("drive.google")) return "google-drive";
+  if (host.includes("notion.")) return "notion";
+  if (host.includes("sharepoint.")) return "sharepoint";
+  if (host.includes("onedrive.")) return "onedrive";
+  if (/\.docx?(?:$|[?#])/.test(path)) return "word";
+  if (/\.xlsx?(?:$|[?#])/.test(path)) return "excel";
+  if (/\.pptx?(?:$|[?#])/.test(path)) return "powerpoint";
+  if ((kind === "email" || kind === "calendar") && (host.includes("outlook.") || host.includes("office.com"))) return "outlook";
+  return null;
+}
+
 function defaultTitle(kind: ResourceKind, url: URL): string {
   if (kind === "email") return url.protocol === "mailto:" ? `Email ${decodeURIComponent(url.pathname)}` : "Open email";
   if (kind === "deployment") return "CodeOps deployment";
@@ -58,6 +79,7 @@ function makeReference(raw: string, label?: string): ResourceReference | null {
     const usefulLabel = label && !/^(open|here|link|view|click here)$/i.test(label.trim()) ? label.trim() : null;
     return {
       kind,
+      brand: brandFor(url, kind),
       url: cleaned,
       title: usefulLabel ?? defaultTitle(kind, url),
       detail: url.protocol === "mailto:" ? decodeURIComponent(url.pathname) : url.hostname.replace(/^www\./, ""),
@@ -94,9 +116,15 @@ export function ResourceLinkPreviewCard({ reference, mine = false }: { reference
         { backgroundColor: colors.surface, borderColor: colors.border, opacity: pressed ? 0.68 : 1 },
       ]}
     >
-      <View style={[styles.kind, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
-        <Text variant="caption" color={colors.text}>{LABELS[reference.kind]}</Text>
-      </View>
+      {reference.brand ? (
+        <View style={[styles.kind, styles.logo, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]} accessibilityLabel={LABELS[reference.kind]}>
+          <BrandLogo brand={reference.brand} size={22} />
+        </View>
+      ) : (
+        <View style={[styles.kind, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+          <Text variant="caption" color={colors.text}>{LABELS[reference.kind]}</Text>
+        </View>
+      )}
       <View style={styles.copy}>
         <Text variant="subtle" color={colors.text} numberOfLines={1} style={styles.title}>{reference.title}</Text>
         <Text variant="caption" numberOfLines={1}>{reference.detail}</Text>
@@ -111,6 +139,7 @@ const styles = StyleSheet.create({
   theirs: { marginRight: space.xxl, alignSelf: "stretch" },
   mine: { marginLeft: space.xxxl, alignSelf: "flex-end" },
   kind: { minWidth: 48, alignItems: "center", borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingHorizontal: space.sm, paddingVertical: 6 },
+  logo: { minWidth: 40, paddingHorizontal: 0, paddingVertical: 0, height: 40, justifyContent: "center" },
   copy: { flex: 1, minWidth: 0 },
   title: { fontWeight: "600" },
 });

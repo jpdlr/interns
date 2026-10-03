@@ -12,7 +12,8 @@ import type { ConnectorsOverview } from "../../src/api";
 import { useSettings } from "../../src/settings";
 import { space } from "../../src/theme";
 import { ConnectorCard, githubSummary, outlookSummary } from "../../src/ui/ConnectorCard";
-import { BranchIcon, BulbIcon, MailIcon } from "../../src/ui/Icons";
+import { BrandLogo } from "../../src/ui/BrandLogo";
+import { BulbIcon } from "../../src/ui/Icons";
 import { EmptyState, ErrorNote, Loading, Screen } from "../../src/ui/Screen";
 import { Text } from "../../src/ui/Text";
 
@@ -45,7 +46,7 @@ export default function ConnectorsScreen() {
       <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + space.xxl }]}>
         <Text variant="subtle">Connect the tools your interns work in. Everything they write there is a draft or a proposal until you approve it.</Text>
         <ConnectorCard
-          icon={<MailIcon size={24} />}
+          icon={<BrandLogo brand="outlook" size={28} />}
           title="Outlook"
           description="Mail and calendar: triage, drafts in your voice, follow-ups, meeting briefs. One or several mailboxes."
           status={outlook}
@@ -53,7 +54,7 @@ export default function ConnectorsScreen() {
           onPress={() => router.push("/connectors/outlook" as never)}
         />
         <ConnectorCard
-          icon={<BranchIcon size={24} />}
+          icon={<BrandLogo brand="github" size={28} />}
           title="GitHub"
           description="Pull request reviews. Your reviewer reads the diff and checks, and proposes a review for you to publish."
           status={github}

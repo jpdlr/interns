@@ -30,6 +30,7 @@
     "android": "expo start --android",
     "export:web": "expo export --platform web && node scripts/stamp-sw.mjs",
     "gen:faces": "node scripts/gen-faces.mjs",
+    "gen:brands": "node scripts/gen-brands.mjs",
     "typecheck": "tsc --noEmit",
     "mock": "node tools/mock-orchestrator.mjs",
     "serve:dist": "node tools/serve-dist.mjs dist 7812",

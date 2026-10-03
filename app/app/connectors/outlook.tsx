@@ -15,6 +15,7 @@ import { useSettings } from "../../src/settings";
 import { radius, scaledFont, space, useAppTheme } from "../../src/theme";
 import { relativeTime } from "../../src/time";
 import { Button } from "../../src/ui/Button";
+import { BrandLogo } from "../../src/ui/BrandLogo";
 import { Group, Row, Segmented } from "../../src/ui/Grouped";
 import { copyText } from "../../src/ui/Markdown";
 import { EmptyState, ErrorNote, Loading, Screen } from "../../src/ui/Screen";
@@ -82,6 +83,7 @@ export default function OutlookConnectorScreen() {
                 return (
                   <View key={m.id}>
                     <Row
+                      icon={<BrandLogo brand="outlook" size={24} />}
                       label={`${m.label}${m.default ? " · default" : ""}`}
                       detail={[m.account, state.text].filter(Boolean).join(" · ")}
                       value={open === m.id ? "Done" : undefined}
@@ -119,7 +121,7 @@ export default function OutlookConnectorScreen() {
               />
             ) : null}
             <Group footer={`Signs in through your app registration ${outlook.app.client_id.slice(0, 8)}… · ${AUDIENCE_LABEL[outlook.app.authority] ?? outlook.app.authority}.`}>
-              <Row label="Microsoft app" value="Change" onPress={() => setOutlook({ ...outlook, app: { ...outlook.app, client_id: null } })} />
+              <Row label="Microsoft app" icon={<BrandLogo brand="microsoft" size={20} />} value="Change" onPress={() => setOutlook({ ...outlook, app: { ...outlook.app, client_id: null } })} />
             </Group>
           </>
         )}

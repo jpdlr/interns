@@ -1,3 +1,4 @@
+import { BrandLogo } from "./BrandLogo";
 import React, { useEffect, useState } from "react";
 import { Linking, Pressable, StyleSheet, View } from "react-native";
 import type { InternsApi, PullRequestPreview } from "../api";
@@ -91,6 +92,7 @@ export function PullRequestPreviewCard({
       ]}
     >
       <View style={styles.topline}>
+        <BrandLogo brand="github" size={18} />
         <Text variant="subtle" color={colors.text} numberOfLines={2} style={styles.repository}>
           {reference.repository} #{reference.number}
         </Text>

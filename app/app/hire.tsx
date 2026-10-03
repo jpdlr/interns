@@ -26,6 +26,7 @@ import { FacePicker } from "../src/ui/FacePicker";
 import { Group, Row, Switch } from "../src/ui/Grouped";
 import { TrashIcon } from "../src/ui/Icons";
 import { SchedulePicker } from "../src/ui/SchedulePicker";
+import { ToolIcon } from "../src/ui/ToolIcon";
 import { Flash, GrowingInput } from "../src/ui/GrowingInput";
 import { InternFace, resolveFaceId } from "../src/ui/InternFace";
 import { EmptyState, ErrorNote, Screen } from "../src/ui/Screen";
@@ -360,7 +361,7 @@ export default function HireScreen() {
 
                 <Group title="What they can use" footer="Picked by the Coordinator for this job. You can change tools on their profile after hiring.">
                   {draft.tools.length ? (
-                    draft.tools.map((tool) => <Row key={tool} label={TOOL_INFO[tool]?.label ?? tool} detail={TOOL_INFO[tool]?.detail} />)
+                    draft.tools.map((tool) => <Row key={tool} icon={<ToolIcon tool={tool} />} label={TOOL_INFO[tool]?.label ?? tool} detail={TOOL_INFO[tool]?.detail} />)
                   ) : (
                     <Row label="No tools" detail="Conversation only" />
                   )}

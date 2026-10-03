@@ -10,6 +10,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import type { InternTemplate } from "../api";
 import { useSettings } from "../settings";
 import { radius, space, useAppTheme } from "../theme";
+import { BrandLogo } from "./BrandLogo";
 import { ChevronRightIcon } from "./Icons";
 import { InternFace, resolveFaceId } from "./InternFace";
 import { Text } from "./Text";
@@ -89,6 +90,7 @@ export function TemplatePicker({
                     hitSlop={6}
                     style={({ pressed }) => [styles.need, { borderColor: colors.border }, pressed && { backgroundColor: colors.accentSoft }]}
                   >
+                    <BrandLogo brand={need} size={14} />
                     <Text variant="caption" color={colors.text}>
                       {NEED_LABEL[need]} ›
                     </Text>
@@ -109,6 +111,6 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: space.md, paddingVertical: space.md, paddingHorizontal: space.lg },
   text: { flex: 1, gap: 2 },
   needs: { flexDirection: "row", gap: space.xs, marginTop: space.xs },
-  need: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.pill, paddingHorizontal: space.sm, paddingVertical: 2 },
+  need: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.pill, paddingHorizontal: space.sm, paddingVertical: 2, flexDirection: "row", alignItems: "center", gap: 4 },
   dimmed: { opacity: 0.5 },
 });

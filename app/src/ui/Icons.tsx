@@ -3,9 +3,10 @@
  * these on web (via react-native-web) and native alike, so no icon font.
  */
 import React from "react";
-import type { ColorValue } from "react-native";
+import { View, type ColorValue } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { useAppTheme } from "../theme";
+import { BrandLogo } from "./BrandLogo";
 
 interface IconProps {
   size?: number;
@@ -83,9 +84,15 @@ export const ListIcon = (p: IconProps) => <Icon {...p} d="M9 6.5h10.5M9 12h10.5M
 export const MailIcon = (p: IconProps) => (
   <Icon {...p} d="M5 5.5h14A1.5 1.5 0 0 1 20.5 7v10a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 17V7A1.5 1.5 0 0 1 5 5.5Zm-1 1 8 6.5 8-6.5" />
 );
-/** GitHub, drawn as a branch (no logos in the icon set). */
+/** A branch, for build/code work. (Products like GitHub use their own logo: BrandLogo.) */
 export const BranchIcon = (p: IconProps) => (
   <Icon {...p} d="M6.5 3.5v11M6.5 14.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5ZM17.5 4a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5ZM17.5 9c0 4-4.5 4-11 5.5" />
+);
+export const TerminalIcon = (p: IconProps) => (
+  <Icon {...p} d="M4.5 5.5h15a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1ZM7.5 9.5 10 12l-2.5 2.5M12 15h4.5" />
+);
+export const GlobeIcon = (p: IconProps) => (
+  <Icon {...p} d="M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM3.5 12h17M12 3.5c2.2 2.3 3.3 5.1 3.3 8.5s-1.1 6.2-3.3 8.5c-2.2-2.3-3.3-5.1-3.3-8.5S9.8 5.8 12 3.5Z" />
 );
 export const BulbIcon = (p: IconProps) => (
   <Icon {...p} d="M9.5 18h5M10.25 21h3.5M12 3a5.75 5.75 0 0 0-3.4 10.4c.55.42.9 1.04.9 1.73V15.5h5v-.37c0-.69.35-1.31.9-1.73A5.75 5.75 0 0 0 12 3Z" />
@@ -103,14 +110,11 @@ export const PinIcon = (p: IconProps) => (
  * monochrome, only ever shown at the dimmed caption color: this is a source
  * marker ("this message came in over Discord"), not a brand badge.
  */
-export function DiscordIcon({ size = 12, color }: IconProps) {
-  const { colors } = useAppTheme();
+/** "Sent from Discord" — Discord's own logo (BrandLogo), at badge size. */
+export function DiscordIcon({ size = 12 }: IconProps) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" accessibilityLabel="sent from Discord">
-      <Path
-        fill={color ?? colors.textFaint}
-        d="M20.32 5.37a19.8 19.8 0 0 0-4.9-1.52.07.07 0 0 0-.08.04c-.21.38-.45.86-.61 1.25a18.3 18.3 0 0 0-5.48 0 12.6 12.6 0 0 0-.62-1.25.08.08 0 0 0-.08-.04c-1.7.29-3.34.8-4.9 1.52a.07.07 0 0 0-.03.03C.83 9.05.15 12.62.48 16.15a.08.08 0 0 0 .03.06 19.9 19.9 0 0 0 5.99 3.03.08.08 0 0 0 .08-.03c.46-.63.87-1.3 1.23-2a.08.08 0 0 0-.04-.11 13.1 13.1 0 0 1-1.87-.89.08.08 0 0 1 0-.13c.13-.09.25-.19.37-.28a.07.07 0 0 1 .08-.01c3.93 1.79 8.18 1.79 12.05 0a.07.07 0 0 1 .08.01c.12.1.24.19.37.28a.08.08 0 0 1 0 .13c-.6.35-1.22.64-1.87.89a.08.08 0 0 0-.04.11c.36.7.78 1.37 1.23 2a.08.08 0 0 0 .08.03 19.85 19.85 0 0 0 6-3.03.08.08 0 0 0 .03-.06c.4-4.08-.66-7.63-2.79-10.75a.06.06 0 0 0-.03-.03ZM8.02 14.05c-1.18 0-2.16-1.08-2.16-2.42s.96-2.42 2.16-2.42c1.21 0 2.18 1.1 2.16 2.42 0 1.34-.96 2.42-2.16 2.42Zm7.97 0c-1.18 0-2.16-1.08-2.16-2.42s.96-2.42 2.16-2.42c1.21 0 2.18 1.1 2.16 2.42 0 1.34-.95 2.42-2.16 2.42Z"
-      />
-    </Svg>
+    <View accessible accessibilityLabel="sent from Discord">
+      <BrandLogo brand="discord" size={size} />
+    </View>
   );
 }
