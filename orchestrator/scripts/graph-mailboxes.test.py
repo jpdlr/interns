@@ -2,7 +2,7 @@
 
     python3 scripts/graph-mailboxes.test.py
 
-No network and no msal needed: every case is refused before a token is read.
+No network and no msal needed: every case stops before a token is used.
 """
 import json, os, subprocess, sys, tempfile
 
@@ -10,7 +10,8 @@ TOOLS = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "tools")
 
 
 def run(tool, args, mailboxes):
-    env = {**os.environ, "INTERNS_HOME": home}
+    # an empty stand-in for msal: every case stops before a token is used, so CI needs no msal
+    env = {**os.environ, "INTERNS_HOME": home, "PYTHONPATH": stub}
     env.pop("INTERNS_MAILBOXES", None)
     if mailboxes is not None:
         env["INTERNS_MAILBOXES"] = mailboxes
@@ -19,6 +20,10 @@ def run(tool, args, mailboxes):
 
 
 home = tempfile.mkdtemp(prefix="interns-mailboxes-")
+stub = os.path.join(home, "stub")
+os.makedirs(stub)
+with open(os.path.join(stub, "msal.py"), "w") as f:
+    f.write("class SerializableTokenCache:\n    def deserialize(self, raw): pass\n")
 for m in ("work", "home"):
     os.makedirs(os.path.join(home, "mailboxes", m))
 with open(os.path.join(home, "config.json"), "w") as f:
