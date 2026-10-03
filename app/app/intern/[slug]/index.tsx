@@ -24,6 +24,7 @@ import { Group, Row, Switch } from "../../../src/ui/Grouped";
 import { BoardIcon, ChatIcon, ListIcon, PaperclipIcon, TableIcon, UsersIcon } from "../../../src/ui/Icons";
 import { InternFace, resolveFaceId } from "../../../src/ui/InternFace";
 import { EmptyState, ErrorNote, Loading, Screen } from "../../../src/ui/Screen";
+import { styleSummary } from "../../../src/ui/hire/PersonalityCard";
 import { InternPages, StandingOrders, useInternPages } from "../../../src/ui/StandingOrders";
 import { Text } from "../../../src/ui/Text";
 
@@ -226,7 +227,7 @@ export default function InternProfile() {
 
         <Group title="About">
           <Row label="Name and role" value={manifest.name} onPress={() => open("about")} />
-          <Row label="Personality" detail={firstLine(manifest.persona) || "Not set"} onPress={() => open("personality")} />
+          <Row label="Personality" detail={styleSummary(manifest.style) || firstLine(manifest.persona) || "Not set"} onPress={() => open("personality")} />
           <Row label="Instructions" value={`${wordCount(manifest.system_prompt).toLocaleString()} words`} onPress={() => open("instructions")} />
         </Group>
 

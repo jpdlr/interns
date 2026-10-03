@@ -20,6 +20,8 @@ import { Group, Row, Switch } from "../../../src/ui/Grouped";
 import { Flash, GrowingInput } from "../../../src/ui/GrowingInput";
 import { CheckIcon, TrashIcon } from "../../../src/ui/Icons";
 import { ToolIcon } from "../../../src/ui/ToolIcon";
+import { StyleDials } from "../../../src/ui/hire/PersonalityCard";
+import { resolveFaceId } from "../../../src/ui/InternFace";
 import { SchedulePicker } from "../../../src/ui/SchedulePicker";
 import { ErrorNote, Loading, Screen } from "../../../src/ui/Screen";
 import { Text } from "../../../src/ui/Text";
@@ -155,7 +157,12 @@ export default function InternEditor() {
           ) : null}
 
           {section === "personality" ? (
-            <Field label={`How ${name} comes across`} note="Their voice: tone, manner, how they talk to you.">
+            <View style={[styles.dials, { backgroundColor: colors.surfaceAlt }]}>
+              <StyleDials faceId={resolveFaceId(form.icon, slug ?? "")} style={form.style} onStyle={(style) => update({ style })} />
+            </View>
+          ) : null}
+          {section === "personality" ? (
+            <Field label={`How ${name} comes across, in words`} note="Anything the dials don't cover: manner, quirks, how they talk to you.">
               <Flash pulse={flashes.persona ?? 0} radius={radius.md}>
                 <GrowingInput value={form.persona} onChangeText={(persona) => editProse({ persona })} style={[inputStyle, styles.long]} minHeight={220} collapsedLines={40} placeholderTextColor={colors.textFaint} placeholder="Calm, dry-witted, allergic to fuss…" />
               </Flash>
@@ -365,6 +372,7 @@ function Field({ label, note, noteColor, children }: { label: string; note?: str
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   bold: { fontWeight: "600" },
+  dials: { borderRadius: radius.lg, padding: space.lg, gap: space.lg },
   check: { width: 24, alignItems: "center" },
   body: { padding: space.lg, gap: space.xl },
   headerButton: { paddingHorizontal: space.md, height: 36, justifyContent: "center" },

@@ -5,7 +5,8 @@
  */
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
-import { ApiError, type InternManifestDetail, type InternManifestPatch, type MetaResponse, type NotifyLevel } from "./api";
+import { ApiError, type InternManifestDetail, type InternManifestPatch, type MetaResponse, type NotifyLevel, type Style } from "./api";
+import { DEFAULT_STYLE } from "./style";
 import { useSettings } from "./settings";
 
 /** Used only if GET /meta fails — mirrors orchestrator/src/engine.ts TOOL_CATALOG keys. */
@@ -62,6 +63,8 @@ export interface FormState {
   notify: NotifyLevel;
   /** Outlook mailboxes they may use; null = every connected one */
   mailboxes: string[] | null;
+  /** personality dials */
+  style: Style;
 }
 
 export function formFromManifest(m: InternManifestDetail): FormState {
@@ -80,6 +83,7 @@ export function formFromManifest(m: InternManifestDetail): FormState {
     drafts_only: m.guardrails.drafts_only,
     notify: m.notify ?? "needs_you",
     mailboxes: m.mailboxes ?? null,
+    style: m.style ?? DEFAULT_STYLE,
   };
 }
 
@@ -103,6 +107,7 @@ export function buildPatch(form: FormState): InternManifestPatch {
     },
     notify: form.notify,
     mailboxes: form.mailboxes,
+    style: form.style,
   };
 }
 
@@ -116,7 +121,7 @@ export function changedPatch(initial: FormState, form: FormState): InternManifes
   const after = buildPatch(form);
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   const out: InternManifestPatch = {};
-  for (const key of ["name", "role", "persona", "system_prompt", "icon", "tools", "backlog", "notify", "mailboxes"] as const) {
+  for (const key of ["name", "role", "persona", "system_prompt", "icon", "tools", "backlog", "notify", "mailboxes", "style"] as const) {
     if (!same(before[key], after[key])) Object.assign(out, { [key]: after[key] });
   }
   const triggers = Object.fromEntries(Object.entries(after.triggers ?? {}).filter(([k, v]) => !same(before.triggers?.[k as keyof typeof before.triggers], v)));

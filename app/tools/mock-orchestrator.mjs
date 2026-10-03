@@ -791,8 +791,9 @@ const server = http.createServer((req, res) => {
         icon: "default",
         persona: `${name} is dry, unflappable and allergic to filler. Reports in short paragraphs, flags what is uncertain, never pads a summary to look busy.`,
         system_prompt: `You are ${name}, ${role}. Work in short sessions. Anything outbound to another human is a draft for Sam to approve — never send. Report back with what you did, what you found and what you need from Sam, in that order.`,
-        tools: ["read_files", "search_web"],
-        triggers: { cron: "0 7 * * 1-5", mentions: true },
+        tools: ["fs.read", "web", "cards"],
+        triggers: { cron: "0 9 * * 1-5", mentions: true },
+        style: { tone: 2, length: 2, initiative: 4, humour: 3 },
         backlog: [
           "Do a first pass and write up what you found",
           "List the recurring questions worth automating",
@@ -802,6 +803,29 @@ const server = http.createServer((req, res) => {
       };
       // The real endpoint is an LLM call; make the wait visible.
       setTimeout(() => json(200, { draft, required_capabilities: [] }), 1800);
+    });
+  }
+
+  // Pre-hire interview: the real one is a no-tools model call in character.
+  if (path === "/hire/interview" && req.method === "POST") {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    return req.on("end", () => {
+      const { draft, question } = JSON.parse(body || "{}");
+      if (!draft?.name || !question || question.trim().length < 2) return json(400, { error: "invalid interview" });
+      const s = draft.style ?? { tone: 3, length: 3, initiative: 3, humour: 3 };
+      const formal = s.tone >= 4;
+      const answer = [
+        formal ? "Good question." : "Easy one.",
+        s.length <= 2
+          ? formal ? "I would read the last two weeks first, then report what needs you." : "I'd skim the last two weeks and tell you what needs you."
+          : formal
+            ? "On my first day I would read the last two weeks of your mail and notes, list what is waiting on you, and draft replies for the obvious ones so you can approve them in one pass."
+            : "Day one I'd go through the last two weeks, list everything waiting on you, and draft the easy replies so you can approve them in one go.",
+        s.initiative >= 4 ? (formal ? "I would also set up follow-ups without waiting to be asked." : "I'd set up follow-ups without you having to ask.") : "",
+        s.humour >= 4 ? "No pressure, but I do love a clean inbox." : "",
+      ].filter(Boolean).join(" ");
+      setTimeout(() => json(200, { answer }), 1200);
     });
   }
 

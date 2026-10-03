@@ -216,9 +216,26 @@ export interface InternManifest {
   system_prompt: string;
   /** tool catalog names, chosen by the coordinator */
   tools: string[];
-  triggers: { mail_push?: boolean; cron?: string; mentions?: boolean };
+  triggers: { mail_push?: boolean; cron?: string; mentions?: boolean; meeting_brief?: boolean };
   backlog: string[];
   guardrails: { drafts_only: boolean; daily_token_cap: number };
+  /** personality dials 1-5 (orchestrator style.ts); unset = all 3 */
+  style?: Style;
+  notify?: NotifyLevel;
+  /** Outlook mailboxes they may use; unset = all */
+  mailboxes?: string[];
+}
+
+/** Personality dials, 1-5 each, 3 = no preference. */
+export interface Style {
+  /** casual … formal */
+  tone: number;
+  /** brief … thorough */
+  length: number;
+  /** waits to be asked … takes initiative */
+  initiative: number;
+  /** straight … playful */
+  humour: number;
 }
 
 export interface CapabilityRequirement {
@@ -260,6 +277,7 @@ export interface InternManifestDetail {
   triggers: { cron?: string | null; mentions?: boolean; mail_push?: boolean; meeting_brief?: boolean };
   /** Outlook mailboxes this intern may use; null = every connected one */
   mailboxes?: string[] | null;
+  style?: Style;
   backlog: string[];
   guardrails: { drafts_only: boolean; daily_token_cap: number };
   /** no schedule, mail, meetings, reviews or routing; JP's own messages still reach them */
@@ -366,7 +384,7 @@ export interface InternWeek {
 export type InternManifestPatch = Partial<
   Pick<
     InternManifestDetail,
-    "name" | "role" | "icon" | "persona" | "system_prompt" | "tools" | "triggers" | "backlog" | "guardrails" | "paused" | "notify" | "mailboxes"
+    "name" | "role" | "icon" | "persona" | "system_prompt" | "tools" | "triggers" | "backlog" | "guardrails" | "paused" | "notify" | "mailboxes" | "style"
   >
 >;
 
@@ -885,6 +903,11 @@ export class InternsApi {
   }
 
   /** A starter intern as a ready draft (same shape as hire(); no model call, nothing written). */
+  /** Ask a candidate a question before hiring; they answer in character. Hires nobody. */
+  interview(draft: InternManifest, question: string, history: { question: string; answer: string }[] = []): Promise<{ answer: string }> {
+    return this.request("/hire/interview", { method: "POST", body: JSON.stringify({ draft, question, history }) });
+  }
+
   hireFromTemplate(id: string): Promise<{ draft: InternManifest; required_capabilities: CapabilityRequirement[] }> {
     return this.request<{ draft: InternManifest; required_capabilities: CapabilityRequirement[] }>("/hire/template", {
       method: "POST",
