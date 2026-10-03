@@ -1,7 +1,7 @@
 /**
  * Connectors: one card per tool the crew can use, with where it stands and
- * one tap to connect or manage it. Outlook and GitHub run their whole setup
- * from here (connectors/outlook, connectors/github); anything else is a
+ * one tap to connect or manage it. Outlook, GitHub and Instagram run their
+ * whole setup from here (connectors/outlook, /github, /instagram); anything else is a
  * conversation with the coordinator, whose builder can make a connector.
  */
 import { useFocusEffect, useRouter } from "expo-router";
@@ -12,7 +12,7 @@ import type { ConnectorsOverview } from "../../src/api";
 import { useCoordinatorName } from "../../src/owner";
 import { useSettings } from "../../src/settings";
 import { space } from "../../src/theme";
-import { ConnectorCard, githubSummary, outlookSummary } from "../../src/ui/ConnectorCard";
+import { ConnectorCard, githubSummary, instagramSummary, outlookSummary } from "../../src/ui/ConnectorCard";
 import { BrandLogo } from "../../src/ui/BrandLogo";
 import { BulbIcon } from "../../src/ui/Icons";
 import { EmptyState, ErrorNote, Loading, Screen } from "../../src/ui/Screen";
@@ -43,6 +43,7 @@ export default function ConnectorsScreen() {
 
   const outlook = outlookSummary(overview.outlook);
   const github = githubSummary(overview.github);
+  const instagram = instagramSummary(overview.instagram);
   return (
     <Screen>
       <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + space.xxl }]}>
@@ -62,6 +63,14 @@ export default function ConnectorsScreen() {
           status={github}
           action={overview.github.connected ? "Manage" : "Connect"}
           onPress={() => router.push("/connectors/github" as never)}
+        />
+        <ConnectorCard
+          icon={<BrandLogo brand="instagram" size={28} />}
+          title="Instagram"
+          description="Market research: public business and creator accounts, their posts and engagement, and what's under a hashtag. Read only."
+          status={instagram}
+          action={overview.instagram.connected ? "Manage" : "Connect"}
+          onPress={() => router.push("/connectors/instagram" as never)}
         />
         <ConnectorCard
           icon={<BulbIcon size={24} />}

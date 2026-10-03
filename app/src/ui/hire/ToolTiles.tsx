@@ -19,6 +19,7 @@ export function ToolTiles({
   selected,
   onToggle,
   outlookConnected,
+  instagramConnected = null,
 }: {
   /** every tool that can be given here */
   tools: string[];
@@ -26,10 +27,12 @@ export function ToolTiles({
   onToggle: (tool: string) => void;
   /** null while unknown */
   outlookConnected: boolean | null;
+  instagramConnected?: boolean | null;
 }) {
   const { colors } = useAppTheme();
   const router = useRouter();
   const needsOutlook = outlookConnected === false && selected.some((t) => OUTLOOK_TOOLS.has(t));
+  const needsInstagram = instagramConnected === false && selected.includes("instagram");
   return (
     <View style={styles.wrap}>
       <View style={styles.grid}>
@@ -72,6 +75,13 @@ export function ToolTiles({
         <Pressable onPress={() => router.push("/connectors/outlook" as never)} accessibilityRole="link" style={[styles.notice, { borderColor: colors.action }]}>
           <Text variant="caption" color={colors.action}>
             Outlook isn't connected yet, so mail and calendar won't work until it is. Connect Outlook ›
+          </Text>
+        </Pressable>
+      ) : null}
+      {needsInstagram ? (
+        <Pressable onPress={() => router.push("/connectors/instagram" as never)} accessibilityRole="link" style={[styles.notice, { borderColor: colors.action }]}>
+          <Text variant="caption" color={colors.action}>
+            Instagram isn't connected yet, so research won't work until it is. Connect Instagram ›
           </Text>
         </Pressable>
       ) : null}

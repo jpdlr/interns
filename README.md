@@ -77,7 +77,7 @@ flowchart LR
   subgraph Box["Your machine"]
     Coord["🎧 Coordinator<br/>orchestrator · Node + SQLite"]
     Interns["🤖 Interns<br/>Claude Agent SDK sessions"]
-    Tools["🧰 Tools<br/>graph-mail · graph-cal · github · pages · cards"]
+    Tools["🧰 Tools<br/>graph-mail · graph-cal · github · ig-research · pages · cards"]
   end
   Outlook[("Outlook / Microsoft Graph")]
   GitHub[("GitHub App")]
@@ -257,6 +257,33 @@ can install it. Webhooks are optional; the orchestrator polls every
 
 The older terminal flow (`npm run setup:github`) and filling in `github.*` by hand still
 work. See [orchestrator/README.md › GitHub App setup](orchestrator/README.md#github-app-setup).
+</details>
+
+<details>
+<summary><b>📸 Instagram research</b></summary>
+
+Interns with the `instagram` tool can research Instagram through `ig-research`, which
+only reads. It looks up public **Business and Creator** accounts (bio, followers, recent
+posts with likes and comments, engagement) and the top or newest posts under a
+**hashtag**. Instagram's API doesn't show personal or private accounts, doesn't say who
+posted hashtag results, and allows 30 different hashtags per rolling 7 days.
+
+Connect it in **Settings › Connectors › Instagram**; the screen lists the same steps:
+
+1. Switch your Instagram account to **Creator** or **Business**. It has to be public; the
+   category and contact buttons can be hidden.
+2. Link it to a **Facebook Page** (Instagram › Edit profile › Page). An empty Page is fine.
+3. Create an app at [Meta for Developers](https://developers.facebook.com/apps) and add
+   the Instagram product.
+4. In [Graph API Explorer](https://developers.facebook.com/tools/explorer), pick the app,
+   choose **User Token**, add `instagram_basic`, `pages_show_list`,
+   `pages_read_engagement`, `instagram_manage_insights` and `business_management`, and
+   generate the token.
+5. Paste the **App ID**, **App secret** and token, then choose who researches.
+
+The short-lived token is exchanged for a long-lived one, and the linked Page's token,
+which doesn't expire, is kept in `~/.interns/instagram/config.json` (0600). The app's
+own Development mode is enough: you are its only user.
 </details>
 
 <details>

@@ -29,6 +29,14 @@ export function githubSummary(g: ConnectorsOverview["github"]): { text: string; 
   return { text: `Reviews in ${on.join(", ")}${g.reviewer ? ` by ${g.reviewer.name}` : ""}`, tone: "ok" };
 }
 
+export function instagramSummary(i: ConnectorsOverview["instagram"]): { text: string; tone: ConnectorTone } {
+  if (!i.connected || !i.account) return { text: "Not connected", tone: "off" };
+  if (i.check && !i.check.ok) return { text: "Needs connecting again", tone: "attention" };
+  if (i.missing.length) return { text: `@${i.account.username} · missing permissions`, tone: "attention" };
+  if (!i.used_by.length) return { text: `@${i.account.username} · nobody researches yet`, tone: "attention" };
+  return { text: `@${i.account.username} · ${i.used_by.map((u) => u.name).join(", ")}`, tone: "ok" };
+}
+
 export function ConnectorCard({
   icon,
   title,

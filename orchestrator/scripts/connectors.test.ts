@@ -1,7 +1,8 @@
 /**
  * Connectors: Outlook sign-in through a fake graph-login, mailbox changes,
- * per-intern mailbox limits, and the GitHub App flow against a fake GitHub.
- * A throwaway INTERNS_HOME; never a real Microsoft or GitHub call.
+ * per-intern mailbox limits, the GitHub App flow against a fake GitHub, and
+ * Instagram against a fake Facebook Graph API.
+ * A throwaway INTERNS_HOME; never a real Microsoft, GitHub or Facebook call.
  *
  *   npm run test:connectors
  */
@@ -21,6 +22,7 @@ const { Registry } = await import("../src/registry.js");
 const { InternManifestSchema } = await import("../src/types.js");
 const { ConnectorService, registerConnectorRoutes, mailboxIdFor } = await import("../src/connectors.js");
 const { mailboxPrompt, mailboxEnv, mailboxesFor } = await import("../src/mailboxes.js");
+const { instagramPrompt, readInstagram } = await import("../src/instagram.js");
 import type { LoginProcess } from "../src/connectors.js";
 
 let failures = 0;
@@ -107,6 +109,35 @@ const fakeGithub = {
     githubCalls.push("reset");
   },
 };
+/** A scripted Facebook Graph API: one app, one Page linked to @studio (and a second when `twoAccounts`). */
+const fakeFacebook = { twoAccounts: false, scopes: ["instagram_basic", "pages_show_list", "pages_read_engagement", "instagram_manage_insights", "instagram_manage_comments"], revoked: false, urls: [] as string[] };
+const graphFetch = async (raw: string) => {
+  const url = new URL(raw);
+  const q = url.searchParams;
+  fakeFacebook.urls.push(url.pathname);
+  const reply = (status: number, body: unknown) => ({ status, json: async () => body });
+  const route = url.pathname.replace(/^\/v[\d.]+\//, "");
+  if (route === "oauth/access_token") {
+    if (q.get("client_secret") !== "0123456789abcdef0123456789abcdef") return reply(400, { error: { message: "Error validating client secret.", code: 1 } });
+    return reply(200, { access_token: "LONG-USER", token_type: "bearer", expires_in: 5_184_000 });
+  }
+  if (route === "debug_token") {
+    return reply(200, { data: q.get("input_token") === "LONG-USER" ? { scopes: fakeFacebook.scopes, expires_at: 1_796_216_610 } : { expires_at: 0 } });
+  }
+  if (route === "me/accounts") {
+    const data = [
+      { id: "p1", name: "Studio", access_token: "PAGE-1", instagram_business_account: { id: "ig1", username: "studio" } },
+      { id: "p0", name: "Unlinked page", access_token: "PAGE-0" },
+      ...(fakeFacebook.twoAccounts ? [{ id: "p2", name: "Side", access_token: "PAGE-2", instagram_business_account: { id: "ig2", username: "sideproject" } }] : []),
+    ];
+    return reply(200, { data });
+  }
+  if (route === "ig1") {
+    if (fakeFacebook.revoked) return reply(400, { error: { message: "Error validating access token", code: 190 } });
+    return reply(200, { business_discovery: { followers_count: 1200, id: "ig1" }, id: "ig1" });
+  }
+  return reply(404, { error: { message: `unexpected ${route}`, code: 100 } });
+};
 let refreshed = 0;
 const connectors = new ConnectorService({
   db,
@@ -117,6 +148,7 @@ const connectors = new ConnectorService({
   githubwatch: { refresh: () => void refreshed++ },
   startLogin: (args) => new FakeLogin(args),
   checkMailbox: async (id) => (id === "work" ? { ok: true, unread: 3 } : { ok: false, error: "token expired" }),
+  graphFetch,
 });
 const app = Fastify();
 registerConnectorRoutes(app, connectors);
@@ -321,6 +353,94 @@ try {
     assert.equal(config.github.app_id, "");
     assert.ok(!fs.existsSync(key), "private key deleted");
     assert.ok(!registry.get("max")!.tools.includes("github"), "tool taken back");
+  });
+
+  await check("instagram: pasted values are checked before Facebook is asked", async () => {
+    assert.equal((await call("GET", "/connectors")).body.instagram.connected, false);
+    assert.equal((await call("POST", "/connectors/instagram/check")).status, 409);
+    const secret = "0123456789abcdef0123456789abcdef";
+    assert.equal((await call("PUT", "/connectors/instagram", { app_id: "not-a-number", app_secret: secret, token: "EAA".padEnd(40, "x") })).status, 400);
+    assert.equal((await call("PUT", "/connectors/instagram", { app_id: "1230000000000001", app_secret: "short", token: "EAA".padEnd(40, "x") })).status, 400);
+    assert.equal((await call("PUT", "/connectors/instagram", { app_id: "1230000000000001", app_secret: secret, token: "too short" })).status, 400);
+    assert.equal(fakeFacebook.urls.length, 0);
+    const wrong = await call("PUT", "/connectors/instagram", { app_id: "1230000000000001", app_secret: "ffffffffffffffffffffffffffffffff", token: "EAA".padEnd(40, "x") });
+    assert.equal(wrong.status, 400);
+    assert.match(wrong.body.error, /didn't accept these: Error validating client secret/);
+    assert.equal(readInstagram(home), null, "nothing stored on failure");
+  });
+
+  await check("instagram: connecting keeps a long-lived Page token, and no secret is ever returned", async () => {
+    const res = await call("PUT", "/connectors/instagram", { app_id: "1230000000000001", app_secret: "0123456789abcdef0123456789abcdef", token: "EAA".padEnd(40, "x") });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.deepEqual(res.body.account, { username: "studio", page: "Studio" });
+    assert.equal(res.body.token_expires_at, null, "the Page token doesn't expire");
+    assert.deepEqual(res.body.missing, []);
+    assert.deepEqual(res.body.acting, ["instagram_manage_comments"], "permissions that could act are named");
+    const stored = readInstagram(home)!;
+    assert.equal(stored.page_token, "PAGE-1");
+    assert.equal(stored.user_token, "LONG-USER");
+    assert.equal(stored.ig_user_id, "ig1");
+    assert.equal(fs.statSync(path.join(home, "instagram", "config.json")).mode & 0o777, 0o600);
+    const overview = JSON.stringify((await call("GET", "/connectors")).body);
+    for (const secret of ["0123456789abcdef", "PAGE-1", "LONG-USER"]) assert.ok(!overview.includes(secret), `${secret} not in responses`);
+  });
+
+  await check("instagram: reconnecting the same app may leave the secret out; several accounts need a choice", async () => {
+    fakeFacebook.twoAccounts = true;
+    const ambiguous = await call("PUT", "/connectors/instagram", { app_id: "1230000000000001", token: "EAA".padEnd(40, "y") });
+    assert.equal(ambiguous.status, 409);
+    assert.match(ambiguous.body.error, /several Instagram accounts \(@studio, @sideproject\)/);
+    assert.equal((await call("PUT", "/connectors/instagram", { app_id: "1230000000000001", token: "EAA".padEnd(40, "y"), username: "@nobody" })).status, 409);
+    const chosen = await call("PUT", "/connectors/instagram", { app_id: "1230000000000001", token: "EAA".padEnd(40, "y"), username: "@SideProject" });
+    assert.equal(chosen.status, 200, JSON.stringify(chosen.body));
+    assert.equal(chosen.body.account.username, "sideproject");
+    assert.equal((await call("PUT", "/connectors/instagram", { app_id: "1230000000000009", token: "EAA".padEnd(40, "y") })).status, 400, "a different app needs its secret");
+    fakeFacebook.twoAccounts = false;
+    await call("PUT", "/connectors/instagram", { app_id: "1230000000000001", token: "EAA".padEnd(40, "z") });
+    assert.equal(readInstagram(home)!.ig_username, "studio");
+  });
+
+  await check("instagram: a token without the basics is refused; one without insights connects with a warning", async () => {
+    const all = fakeFacebook.scopes;
+    fakeFacebook.scopes = ["pages_show_list"];
+    const res = await call("PUT", "/connectors/instagram", { app_id: "1230000000000001", token: "EAA".padEnd(40, "z") });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /missing instagram_basic/);
+    fakeFacebook.scopes = ["instagram_basic", "pages_show_list"];
+    const partial = (await call("PUT", "/connectors/instagram", { app_id: "1230000000000001", token: "EAA".padEnd(40, "z") })).body;
+    assert.deepEqual(partial.missing, ["pages_read_engagement", "instagram_manage_insights"]);
+    fakeFacebook.scopes = all;
+    await call("PUT", "/connectors/instagram", { app_id: "1230000000000001", token: "EAA".padEnd(40, "z") });
+  });
+
+  await check("instagram: check reads the account; a revoked token says to reconnect", async () => {
+    const ok = (await call("POST", "/connectors/instagram/check")).body;
+    assert.equal(ok.ok, true);
+    assert.equal(ok.followers, 1200);
+    assert.equal((await call("GET", "/connectors/instagram")).body.check.ok, true);
+    fakeFacebook.revoked = true;
+    const bad = (await call("POST", "/connectors/instagram/check")).body;
+    assert.equal(bad.ok, false);
+    assert.match(bad.error, /expired or was revoked/);
+    fakeFacebook.revoked = false;
+  });
+
+  await check("instagram: choosing who researches grants the tool; the prompt follows the connection", async () => {
+    assert.equal((await call("PATCH", "/connectors/instagram", { interns: { nobody: true } })).status, 404);
+    const status = (await call("PATCH", "/connectors/instagram", { interns: { max: true } })).body;
+    assert.deepEqual(status.used_by, [{ slug: "max", name: "Max" }]);
+    const max = registry.get("max")!;
+    assert.ok(max.tools.includes("instagram"));
+    assert.match(instagramPrompt(max, home, "Owner"), /through @studio, Owner's connected account/);
+    assert.match(instagramPrompt(max, home, "Owner"), /never post, comment, like, follow or message/);
+    assert.equal(instagramPrompt(registry.get("sam")!, home), "", "no tool, no prompt");
+
+    const off = (await call("DELETE", "/connectors/instagram")).body;
+    assert.equal(off.connected, false);
+    assert.equal(readInstagram(home), null);
+    assert.ok(registry.get("max")!.tools.includes("instagram"), "the tool stays, so reconnecting gives research back");
+    assert.match(instagramPrompt(registry.get("max")!, home, "Owner"), /isn't connected yet/);
+    assert.equal((await call("PATCH", "/connectors/instagram", { interns: { max: false } })).body.used_by.length, 0);
   });
 } finally {
   await app.close();

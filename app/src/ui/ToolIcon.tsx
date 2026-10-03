@@ -1,6 +1,6 @@
 /**
  * The icon for an intern tool row: the product's own logo when the tool is a
- * product (Outlook mail and calendar, GitHub), otherwise a plain glyph.
+ * product (Outlook mail and calendar, GitHub, Instagram), otherwise a plain glyph.
  */
 import React from "react";
 import { BrandLogo, TOOL_BRAND } from "./BrandLogo";

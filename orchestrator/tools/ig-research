@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""ig-research — read-only Instagram research CLI for interns.
+
+Uses the Instagram API with Facebook Login (Meta Graph API) through the
+owner's own Business or Creator account, connected in the app under
+Settings › Connectors › Instagram. The connector writes
+$INTERNS_HOME/instagram/config.json (mode 600) with a Page token that does
+not expire; this tool only reads that file.
+
+  ig-research whoami                         the connected account
+  ig-research profile <username> [--posts N] a public Business/Creator account: bio, followers, recent posts
+  ig-research hashtag <tag> [--recent] [--limit N]   top (or most recent) posts for a hashtag
+  ig-research quota                          hashtags searched in the last 7 days (Instagram allows 30)
+
+HARD GUARDRAIL: research only. The token may carry wider permissions the
+owner granted for later (publishing, comments, messages); this CLI never
+uses them. Do not add publish, comment, like, follow or message commands —
+anything that acts on Instagram belongs in its own capability behind an
+approval card.
+
+Every command prints JSON; failures print {"error": "..."} and exit 1.
+IG_GRAPH_BASE overrides the API base (tests point it at a local fake).
+"""
+import argparse, json, os, re, sys, urllib.error, urllib.parse, urllib.request
+
+GRAPH = os.environ.get("IG_GRAPH_BASE", "https://graph.facebook.com/v25.0").rstrip("/")
+HASHTAG_WEEKLY_LIMIT = 30
+CAPTION_MAX = 1000
+USERNAME = re.compile(r"^[A-Za-z0-9._]{1,30}$")
+
+PROFILE_FIELDS = "username,name,biography,website,followers_count,follows_count,media_count,profile_picture_url"
+MEDIA_FIELDS = "id,caption,media_type,media_product_type,like_count,comments_count,timestamp,permalink"
+HASHTAG_MEDIA_FIELDS = "id,caption,media_type,like_count,comments_count,timestamp,permalink"
+
+
+def die(msg, code=1):
+    print(json.dumps({"error": msg}))
+    sys.exit(code)
+
+
+def config_path():
+    home = os.environ.get("INTERNS_HOME") or os.path.expanduser("~/.interns")
+    return os.path.join(home, "instagram", "config.json")
+
+
+def load_config():
+    try:
+        with open(config_path()) as f:
+            cfg = json.load(f)
+    except FileNotFoundError:
+        die("Instagram isn't connected. Ask the owner to connect it in Settings › Connectors › Instagram.")
+    except (OSError, ValueError) as e:
+        die(f"can't read the Instagram connection: {e}")
+    token = cfg.get("page_token") or cfg.get("user_token")
+    if not token or not cfg.get("ig_user_id"):
+        die("Instagram isn't fully connected. Ask the owner to reconnect it in Settings › Connectors › Instagram.")
+    return cfg, token
+
+
+def explain(err, context):
+    """Graph errors in words an intern can act on."""
+    code, sub = err.get("code"), err.get("error_subcode")
+    msg = err.get("message") or "Instagram returned an error"
+    if code == 190:
+        return "The Instagram connection has expired or was revoked. Ask the owner to reconnect it in Settings › Connectors › Instagram."
+    if context.get("username") and (code == 110 or sub == 2207013 or "Invalid user id" in msg):
+        return (f"No public Business or Creator account called @{context['username']}. "
+                "Personal and private accounts can't be looked up through Instagram's API.")
+    if code == 24 or sub == 2207042 or "maximum number of hashtags" in msg.lower():
+        return f"This account has used its {HASHTAG_WEEKLY_LIMIT} hashtag searches for the last 7 days. Run `ig-research quota` to see which ones; searching those again is free."
+    if code == 10 or code == 200:
+        return f"The Instagram app doesn't have permission for this ({msg}). Ask the owner to reconnect Instagram with the permissions listed on the connector screen."
+    if code in (4, 17, 32, 613):
+        return "Instagram's rate limit was hit. Wait a while before trying again."
+    return msg
+
+
+def get(path, token, context=None, **params):
+    params["access_token"] = token
+    url = f"{GRAPH}/{path}?{urllib.parse.urlencode(params)}"
+    try:
+        with urllib.request.urlopen(url, timeout=30) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            err = json.load(e).get("error", {})
+        except ValueError:
+            err = {"message": f"HTTP {e.code}"}
+        die(explain(err, context or {}))
+    except (urllib.error.URLError, TimeoutError) as e:
+        die(f"can't reach Instagram: {getattr(e, 'reason', e)}")
+
+
+def trim(post):
+    caption = post.get("caption")
+    if caption and len(caption) > CAPTION_MAX:
+        post["caption"] = caption[:CAPTION_MAX] + "…"
+    return post
+
+
+def engagement(posts, followers):
+    """Averages over the returned posts; like_count is missing where the owner hid likes."""
+    liked = [p["like_count"] for p in posts if isinstance(p.get("like_count"), int)]
+    comments = [p["comments_count"] for p in posts if isinstance(p.get("comments_count"), int)]
+    if not posts:
+        return None
+    avg_likes = round(sum(liked) / len(liked), 1) if liked else None
+    avg_comments = round(sum(comments) / len(comments), 1) if comments else None
+    rate = None
+    if followers and avg_likes is not None:
+        rate = round(100 * (avg_likes + (avg_comments or 0)) / followers, 3)
+    return {"posts_counted": len(posts), "avg_likes": avg_likes, "avg_comments": avg_comments, "engagement_rate_pct": rate,
+            "likes_hidden_on": len(posts) - len(liked)}
+
+
+def cmd_whoami(cfg, token, _args):
+    me = get(cfg["ig_user_id"], token, fields="username,name,followers_count,media_count")
+    return {"username": me.get("username"), "name": me.get("name"), "followers_count": me.get("followers_count"),
+            "media_count": me.get("media_count"), "page": cfg.get("page_name")}
+
+
+def cmd_profile(cfg, token, args):
+    username = args.username.lstrip("@")
+    if not USERNAME.match(username):
+        die(f"'{args.username}' isn't an Instagram username")
+    n = max(1, min(args.posts, 50))
+    fields = f"business_discovery.username({username}){{{PROFILE_FIELDS},media.limit({n}){{{MEDIA_FIELDS}}}}}"
+    bd = get(cfg["ig_user_id"], token, {"username": username}, fields=fields).get("business_discovery") or {}
+    posts = [trim(p) for p in (bd.pop("media", None) or {}).get("data", [])]
+    return {**bd, "url": f"https://www.instagram.com/{bd.get('username', username)}/", "recent_posts": posts,
+            "engagement": engagement(posts, bd.get("followers_count"))}
+
+
+def normalize_tag(raw):
+    tag = raw.strip().lstrip("#").lower()
+    if not tag or not all(ch.isalnum() or ch == "_" for ch in tag):
+        die(f"'{raw}' isn't a hashtag Instagram can search (letters, digits and _ only; no spaces or emoji)")
+    return tag
+
+
+def cmd_hashtag(cfg, token, args):
+    tag = normalize_tag(args.tag)
+    ig = cfg["ig_user_id"]
+    found = get("ig_hashtag_search", token, user_id=ig, q=tag).get("data") or []
+    if not found:
+        die(f"Instagram has no hashtag #{tag}")
+    edge = "recent_media" if args.recent else "top_media"
+    n = max(1, min(args.limit, 50))
+    posts = get(f"{found[0]['id']}/{edge}", token, user_id=ig, fields=HASHTAG_MEDIA_FIELDS, limit=n).get("data") or []
+    return {"hashtag": tag, "sort": "recent" if args.recent else "top", "url": f"https://www.instagram.com/explore/tags/{tag}/",
+            "posts": [trim(p) for p in posts[:n]],
+            "note": "Instagram doesn't say who posted hashtag results; open a post's permalink to see the account."}
+
+
+def cmd_quota(cfg, token, _args):
+    rows = get(f"{cfg['ig_user_id']}/recently_searched_hashtags", token, fields="name", limit=HASHTAG_WEEKLY_LIMIT).get("data") or []
+    names = [r.get("name") for r in rows if r.get("name")]
+    return {"used": len(names), "limit": HASHTAG_WEEKLY_LIMIT, "remaining": max(0, HASHTAG_WEEKLY_LIMIT - len(names)),
+            "searched": names, "note": "A rolling 7 days. Searching a hashtag already on this list is free."}
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="ig-research", description="Read-only Instagram research (public Business/Creator accounts and hashtags).")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("whoami", help="the connected account")
+    p = sub.add_parser("profile", help="a public Business or Creator account: bio, followers, recent posts")
+    p.add_argument("username")
+    p.add_argument("--posts", type=int, default=12, help="recent posts to include (1-50, default 12)")
+    h = sub.add_parser("hashtag", help="top or recent posts for a hashtag (30 unique hashtags per 7 days)")
+    h.add_argument("tag")
+    h.add_argument("--recent", action="store_true", help="newest posts (last 24 hours) instead of top posts")
+    h.add_argument("--limit", type=int, default=15, help="posts to return (1-50, default 15)")
+    sub.add_parser("quota", help="hashtags searched in the last 7 days")
+    args = ap.parse_args()
+    cfg, token = load_config()
+    out = {"whoami": cmd_whoami, "profile": cmd_profile, "hashtag": cmd_hashtag, "quota": cmd_quota}[args.cmd](cfg, token, args)
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()

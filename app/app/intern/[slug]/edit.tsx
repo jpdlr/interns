@@ -243,7 +243,7 @@ export default function InternEditor() {
           ) : null}
 
           {section === "tools" ? (
-            <Group footer="Mail is always drafts-only: nothing is sent without you. GitHub is given to the reviewer you pick in Settings › Connectors; builds are granted by the coordinator.">
+            <Group footer="Mail is always drafts-only: nothing is sent without you. Instagram research only reads, and works once Instagram is connected in Settings › Connectors. GitHub is given to the reviewer you pick there; builds are granted by the coordinator.">
               {tools.map((tool) => {
                 const on = form.tools.includes(tool);
                 const info = TOOL_INFO[tool];

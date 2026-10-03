@@ -15,6 +15,13 @@
  * installations. The owner then picks which accounts get reviews and which
  * intern reviews. Browser-side redirects only: no tunnel, no restart.
  *
+ * Instagram — research only, through the owner's Business or Creator account
+ * linked to a Facebook Page. The owner creates a Meta app, generates a user
+ * token in Graph API Explorer and pastes it here with the app's ID and
+ * secret; connecting swaps it for a long-lived token and keeps the Page's
+ * token, which doesn't expire (instagram.ts). Choosing who researches here
+ * grants the `instagram` tool.
+ *
  * All /connectors routes are token-gated; the two /oauth/github routes are
  * plain browser navigations, guarded by one-time state (callback) or by
  * only reading from GitHub with the App's own credentials (installed).
@@ -30,6 +37,18 @@ import { saveConfig, type Config } from "./config.js";
 import type { Db } from "./db.js";
 import { TOOLS_DIR } from "./engine.js";
 import type { GithubClient, GithubInstallation } from "./github.js";
+import {
+  actingScopes,
+  expiry,
+  GraphError,
+  graphGet,
+  missingScopes,
+  readInstagram,
+  removeInstagram,
+  usesInstagram,
+  writeInstagram,
+  type GraphFetch,
+} from "./instagram.js";
 import { listMailboxes, mailboxesDir, mailboxesFor, readMailbox, usesOutlook } from "./mailboxes.js";
 import type { Registry } from "./registry.js";
 
@@ -69,9 +88,13 @@ export interface ConnectorDeps {
   startLogin?: StartLogin;
   /** tests inject a fake; default runs tools/graph-mail whoami */
   checkMailbox?: (id: string) => Promise<{ ok: boolean; unread?: number; error?: string }>;
+  /** tests inject a fake Facebook; default is fetch */
+  graphFetch?: GraphFetch;
 }
 
 const MAILBOX_ID = /^[a-z0-9][a-z0-9_-]*$/;
+const META_APP_ID = /^\d{5,20}$/;
+const META_APP_SECRET = /^[0-9a-f]{32}$/i;
 const CLIENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Free mail providers: their domain is never "one of the owner's own". */
 const PERSONAL_DOMAINS = new Set(["outlook.com", "hotmail.com", "live.com", "msn.com", "gmail.com", "icloud.com", "yahoo.com"]);
@@ -93,6 +116,8 @@ function defaultStartLogin(args: string[], env: NodeJS.ProcessEnv): LoginProcess
     kill: () => child.kill("SIGTERM"),
   };
 }
+
+const defaultGraphFetch: GraphFetch = (url) => fetch(url, { signal: AbortSignal.timeout(30_000) });
 
 function defaultCheckMailbox(home: string): (id: string) => Promise<{ ok: boolean; unread?: number; error?: string }> {
   return (id) =>
@@ -132,12 +157,15 @@ export class ConnectorService {
   private githubStates = new Map<string, { step: "create" | "install"; origin: string; expires: number }>();
   private appCache: { at: number; app: Awaited<ReturnType<GithubClient["getApp"]>> } | null = null;
   private checks = new Map<string, { at: string; ok: boolean; unread?: number; error?: string }>();
+  private instagramCheck: { at: string; ok: boolean; followers?: number; error?: string } | null = null;
   private readonly startLogin: StartLogin;
   private readonly checkMailboxFn: (id: string) => Promise<{ ok: boolean; unread?: number; error?: string }>;
+  private readonly graphFetch: GraphFetch;
 
   constructor(private deps: ConnectorDeps) {
     this.startLogin = deps.startLogin ?? defaultStartLogin;
     this.checkMailboxFn = deps.checkMailbox ?? defaultCheckMailbox(deps.home);
+    this.graphFetch = deps.graphFetch ?? defaultGraphFetch;
   }
 
   private save(): void {
@@ -147,7 +175,7 @@ export class ConnectorService {
   // --------------------------------------------------------- overview
 
   async overview() {
-    return { outlook: this.outlook(), github: await this.githubStatus() };
+    return { outlook: this.outlook(), github: await this.githubStatus(), instagram: this.instagramStatus() };
   }
 
   // ----------------------------------------------------------- Outlook
@@ -536,6 +564,136 @@ export class ConnectorService {
     this.deps.github.resetTokens();
     this.appCache = null;
   }
+
+  // --------------------------------------------------------- Instagram
+
+  instagramStatus() {
+    const { registry, home } = this.deps;
+    const c = readInstagram(home);
+    return {
+      connected: Boolean(c),
+      account: c ? { username: c.ig_username, page: c.page_name || null } : null,
+      app_id: c?.app_id || null,
+      connected_at: c?.connected_at || null,
+      /** null = doesn't expire */
+      token_expires_at: c ? (c.page_token ? c.page_token_expires_at : c.user_token_expires_at) : null,
+      /** permissions research needs that the token lacks */
+      missing: c && c.scopes.length ? missingScopes(c.scopes) : [],
+      /** permissions the token has that could act on the account (never used) */
+      acting: c ? actingScopes(c.scopes) : [],
+      used_by: registry
+        .list()
+        .filter(({ manifest }) => usesInstagram(manifest))
+        .map(({ slug, manifest }) => ({ slug, name: manifest.name })),
+      check: c ? this.instagramCheck : null,
+    };
+  }
+
+  /**
+   * Connect (or reconnect) from what the owner pasted: the Meta app's ID and
+   * secret (the secret may be left out when reconnecting the same app) and a
+   * user token from Graph API Explorer. `username` picks the account when
+   * the token sees several.
+   */
+  async connectInstagram(input: { app_id: string; app_secret?: string; token: string; username?: string }) {
+    const { home } = this.deps;
+    const appId = input.app_id.trim();
+    if (!META_APP_ID.test(appId)) throw new ConnectorError(400, "That doesn't look like an App ID. It's the long number under App settings › Basic.");
+    const previous = readInstagram(home);
+    const secret = input.app_secret?.trim() || (previous?.app_id === appId ? previous.app_secret : "");
+    if (!META_APP_SECRET.test(secret)) throw new ConnectorError(400, "Paste the App secret from App settings › Basic (32 letters and digits).");
+    const token = input.token.trim();
+    if (token.length < 20 || /\s/.test(token)) throw new ConnectorError(400, "Paste the access token from Graph API Explorer.");
+
+    const get = <T>(route: string, params: Record<string, string>) => graphGet<T>(this.graphFetch, route, params);
+    let long: { access_token: string; expires_in?: number };
+    try {
+      long = await get("oauth/access_token", { grant_type: "fb_exchange_token", client_id: appId, client_secret: secret, fb_exchange_token: token });
+    } catch (err) {
+      throw new ConnectorError(400, `Facebook didn't accept these: ${err instanceof Error ? err.message : String(err)} Check the App ID and secret, and generate a fresh token.`);
+    }
+    const appToken = `${appId}|${secret}`;
+    const debug = await get<{ data: { scopes?: string[]; expires_at?: number } }>("debug_token", { input_token: long.access_token, access_token: appToken });
+    const scopes = debug.data.scopes ?? [];
+    if (!scopes.includes("instagram_basic") || !scopes.includes("pages_show_list")) {
+      throw new ConnectorError(400, `The token is missing ${["instagram_basic", "pages_show_list"].filter((s) => !scopes.includes(s)).join(" and ")}. Add the permissions listed here in Graph API Explorer and generate it again.`);
+    }
+    type PageRow = { id: string; name: string; access_token: string; instagram_business_account?: { id: string; username?: string } };
+    const pages = await get<{ data: PageRow[] }>("me/accounts", { fields: "id,name,access_token,instagram_business_account{id,username}", limit: "100", access_token: long.access_token });
+    const linked = pages.data.filter((p) => p.instagram_business_account);
+    if (!linked.length) {
+      throw new ConnectorError(409, "None of the Facebook Pages this token can see has an Instagram account linked. Link your Business or Creator account to a Page (Instagram › Edit profile › Page), then select that Page when you generate the token.");
+    }
+    const wanted = input.username?.trim().replace(/^@/, "").toLowerCase();
+    const handles = linked.map((p) => `@${p.instagram_business_account!.username ?? p.instagram_business_account!.id}`).join(", ");
+    const page = wanted ? linked.find((p) => p.instagram_business_account!.username?.toLowerCase() === wanted) : linked.length === 1 ? linked[0] : undefined;
+    if (!page) {
+      throw new ConnectorError(409, wanted ? `@${wanted} isn't linked to a Page this token can see. It can see ${handles}.` : `This token can see several Instagram accounts (${handles}). Type the one to use.`);
+    }
+    const pageDebug = await get<{ data: { expires_at?: number } }>("debug_token", { input_token: page.access_token, access_token: appToken });
+    writeInstagram(home, {
+      app_id: appId,
+      app_secret: secret,
+      user_token: long.access_token,
+      user_token_expires_at: expiry(debug.data.expires_at) ?? (long.expires_in ? new Date(Date.now() + long.expires_in * 1000).toISOString() : null),
+      page_id: page.id,
+      page_name: page.name,
+      page_token: page.access_token,
+      page_token_expires_at: expiry(pageDebug.data.expires_at),
+      ig_user_id: page.instagram_business_account!.id,
+      ig_username: page.instagram_business_account!.username ?? "",
+      scopes,
+      connected_at: new Date().toISOString(),
+    });
+    this.instagramCheck = null;
+    return this.instagramStatus();
+  }
+
+  /** Look the connected account up the way research does: proves the token and the profile-lookup permission. */
+  async checkInstagram() {
+    const c = readInstagram(this.deps.home);
+    if (!c) throw new ConnectorError(409, "Connect Instagram first.");
+    const at = new Date().toISOString();
+    try {
+      const fields = c.ig_username ? `business_discovery.username(${c.ig_username}){followers_count}` : "followers_count";
+      const res = await graphGet<{ followers_count?: number; business_discovery?: { followers_count?: number } }>(this.graphFetch, c.ig_user_id, { fields, access_token: c.page_token || c.user_token });
+      this.instagramCheck = { at, ok: true, followers: res.business_discovery?.followers_count ?? res.followers_count };
+    } catch (err) {
+      const expired = err instanceof GraphError && err.code === 190;
+      const denied = err instanceof GraphError && err.code === 10;
+      this.instagramCheck = {
+        at,
+        ok: false,
+        error: expired
+          ? "The connection expired or was revoked. Connect again with a fresh token."
+          : denied
+            ? "Profile lookups aren't allowed. Generate the token again with instagram_manage_insights."
+            : err instanceof Error
+              ? err.message
+              : String(err),
+      };
+    }
+    return this.instagramCheck;
+  }
+
+  /** Who may research: the owner choosing here is the approval, so the tool is granted directly. */
+  updateInstagram(patch: { interns: Record<string, boolean> }) {
+    const { registry } = this.deps;
+    for (const slug of Object.keys(patch.interns)) if (!registry.get(slug)) throw new ConnectorError(404, `No intern called ${slug}.`);
+    for (const [slug, on] of Object.entries(patch.interns)) {
+      const manifest = registry.get(slug)!;
+      if (on && !manifest.tools.includes("instagram")) registry.save({ ...manifest, tools: [...manifest.tools, "instagram"] }, slug);
+      if (!on && manifest.tools.includes("instagram")) registry.save({ ...manifest, tools: manifest.tools.filter((t) => t !== "instagram") }, slug);
+    }
+    return this.instagramStatus();
+  }
+
+  /** Forget the tokens. Interns keep the tool, so reconnecting gives research back to the same people. */
+  disconnectInstagram() {
+    removeInstagram(this.deps.home);
+    this.instagramCheck = null;
+    return this.instagramStatus();
+  }
 }
 
 export class ConnectorError extends Error {
@@ -612,6 +770,21 @@ export function registerConnectorRoutes(app: FastifyInstance, connectors: Connec
     return run(reply, async () => (connectors.updateGithub(body.data), connectors.githubStatus()));
   });
   app.delete("/connectors/github", async () => (connectors.disconnectGithub(), connectors.githubStatus()));
+
+  // Instagram
+  app.get("/connectors/instagram", async () => connectors.instagramStatus());
+  app.put("/connectors/instagram", async (req, reply) => {
+    const body = z.object({ app_id: z.string().max(40), app_secret: z.string().max(80).optional(), token: z.string().max(1000), username: z.string().max(40).optional() }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "app_id and token required" });
+    return run(reply, () => connectors.connectInstagram(body.data));
+  });
+  app.post("/connectors/instagram/check", async (_req, reply) => run(reply, () => connectors.checkInstagram()));
+  app.patch("/connectors/instagram", async (req, reply) => {
+    const body = z.object({ interns: z.record(z.string(), z.boolean()) }).strict().safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: "invalid change" });
+    return run(reply, () => connectors.updateInstagram(body.data));
+  });
+  app.delete("/connectors/instagram", async () => connectors.disconnectInstagram());
 
   // Browser navigations back from github.com (no bearer token; see the module comment).
   const page = (title: string, body: string) =>

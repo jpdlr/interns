@@ -17,6 +17,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { internsHome, type Config } from "./config.js";
 import type { Db } from "./db.js";
+import { instagramPrompt } from "./instagram.js";
 import { mailboxEnv, mailboxPrompt } from "./mailboxes.js";
 import { ownerName } from "./profile.js";
 import type { Registry } from "./registry.js";
@@ -66,6 +67,9 @@ export const TOOL_CATALOG: Record<string, string[]> = {
   pages: [tool("intern-page")],
   // Standing orders JP gives in chat, saved so they stick.
   rules: [tool("intern-rule")],
+  // Instagram research via the read-only ig-research CLI (public Business/Creator
+  // profiles and hashtags; no publish, comment or message command exists).
+  instagram: [tool("ig-research")],
 };
 
 /**
@@ -230,6 +234,7 @@ export class SdkEngine implements Engine {
       standingOrdersPrompt(this.db.listRules(slug)),
       unreachableColleagues(this.registry, slug),
       mailboxPrompt(manifest, this.config, internsHome()),
+      instagramPrompt(manifest, internsHome()),
     ].join("");
 
     const options: Options = {

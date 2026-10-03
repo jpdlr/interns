@@ -12,6 +12,7 @@ import { useAppTheme } from "../theme";
 export type Brand =
   | "outlook"
   | "github"
+  | "instagram"
   | "microsoft"
   | "discord"
   | "clickup"
@@ -31,11 +32,16 @@ export const TOOL_BRAND: Record<string, Brand> = {
   mail: "outlook",
   calendar: "outlook",
   github: "github",
+  instagram: "instagram",
 };
 
 export function BrandLogo({ brand, size = 24, style }: { brand: Brand; size?: number; style?: ViewStyle }) {
   const { scheme } = useAppTheme();
-  const svg = (scheme === "dark" && BRAND_SVGS[`${brand}_dark`]) || BRAND_SVGS[brand] || "";
+  const raw = (scheme === "dark" && BRAND_SVGS[`${brand}_dark`]) || BRAND_SVGS[brand] || "";
+  // Ids are unique per brand, not per copy: on web a hidden screen underneath
+  // can hold the same logo, and a gradient that resolves into it paints nothing.
+  const uid = React.useId().replace(/[^A-Za-z0-9_-]/g, "");
+  const svg = React.useMemo(() => raw.replace(/(id="|#)brand-/g, `$1brand-${uid}-`), [raw, uid]);
   const frame: ViewStyle = { width: size, height: size };
   if (Platform.OS === "web") {
     return (

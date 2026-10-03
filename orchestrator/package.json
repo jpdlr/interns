@@ -12,7 +12,7 @@
     "start": "node dist/src/index.js",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "npm run smoke && npm run test:schedules && npm run test:features && npm run test:connectors && npm run test:github && npm run test:mailwatch && npm run test:meetingwatch && npm run test:graph-mail",
+    "test": "npm run smoke && npm run test:schedules && npm run test:features && npm run test:connectors && npm run test:github && npm run test:mailwatch && npm run test:meetingwatch && npm run test:graph-mail && npm run test:ig-research",
     "smoke": "tsx scripts/smoke.ts",
     "test:features": "tsx scripts/features.test.ts",
     "test:connectors": "tsx scripts/connectors.test.ts",
@@ -21,6 +21,7 @@
     "test:meetingwatch": "tsx scripts/meetingwatch.test.ts",
     "test:schedules": "tsx scripts/schedules.test.ts",
     "test:graph-mail": "python3 scripts/graph-mail.test.py && python3 scripts/graph-mail-drafts.test.py && python3 scripts/graph-mailboxes.test.py",
+    "test:ig-research": "python3 scripts/ig-research.test.py",
     "setup:github": "tsx scripts/github-setup.ts",
     "setup:github-orgs": "tsx scripts/github-org-setup.ts",
     "sync:github-installations": "tsx scripts/github-installations.ts"

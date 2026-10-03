@@ -20,6 +20,15 @@ and versions follow [Semantic Versioning](https://semver.org/).
   them, the starters carry presets, and the dials can be changed on the profile.
 - **Interview before hiring** (`POST /hire/interview`): put a question to a candidate and
   hear them answer in character. Nobody is hired; the coordinator pays for the call.
+- **Instagram research connector.** Connect your Business or Creator account in
+  Settings › Connectors › Instagram, then choose who researches. They get the read-only
+  `ig-research` CLI (`instagram` tool): public Business/Creator profiles with recent posts
+  and engagement, top and recent posts under a hashtag, and the weekly hashtag quota. It
+  has no post, comment or message command.
+
+### Fixed
+- Brand logos with gradients (Outlook, Instagram, Office) no longer paint blank when the
+  same logo is also on a screen underneath.
 
 ## [0.1.0] - 2026-10-03
 

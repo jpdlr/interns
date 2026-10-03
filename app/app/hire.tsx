@@ -108,6 +108,7 @@ export default function HireScreen() {
   const [hired, setHired] = useState<{ slug: string; name: string } | null>(null);
   const [catalog, setCatalog] = useState<string[]>(FALLBACK_TOOLS);
   const [outlookConnected, setOutlookConnected] = useState<boolean | null>(null);
+  const [instagramConnected, setInstagramConnected] = useState<boolean | null>(null);
   const nameCarry = useNameCarry();
   const [renameNote, setRenameNote] = useState<string | null>(null);
   const [flashes, setFlashes] = useState<Partial<Record<ProseField, number>>>({});
@@ -118,7 +119,10 @@ export default function HireScreen() {
   useEffect(() => {
     if (!configured) return;
     api.getMeta().then((m) => m.tools?.length && setCatalog(m.tools), () => {});
-    api.connectors().then((c) => setOutlookConnected(c.outlook.mailboxes.length > 0), () => {});
+    api.connectors().then(
+      (c) => (setOutlookConnected(c.outlook.mailboxes.length > 0), setInstagramConnected(c.instagram.connected)),
+      () => {},
+    );
   }, [api, configured]);
 
   useEffect(() => {
@@ -427,6 +431,7 @@ export default function HireScreen() {
                 tools={tiles}
                 selected={draft.tools}
                 outlookConnected={outlookConnected}
+                instagramConnected={instagramConnected}
                 onToggle={(tool) => update({ tools: draft.tools.includes(tool) ? draft.tools.filter((t) => t !== tool) : [...draft.tools, tool] })}
               />
               {requiredCapabilities.length ? (

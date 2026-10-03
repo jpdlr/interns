@@ -31,7 +31,7 @@ const owner = {
   connected: { outlook: process.env.MOCK_FRESH ? [] : ["work"], github: false, discord: false, push: true },
 };
 
-/** Connectors state: MOCK_FRESH starts with nothing connected; MOCK_GITHUB=1 starts GitHub connected. */
+/** Connectors state: MOCK_FRESH starts with nothing connected; MOCK_GITHUB=1 / MOCK_INSTAGRAM=1 start those connected. */
 const connectorState = {
   client_id: process.env.MOCK_FRESH ? null : "11111111-2222-3333-4444-555555555555",
   authority: "organizations",
@@ -46,7 +46,15 @@ const connectorState = {
   github: process.env.MOCK_GITHUB
     ? { connected: true, app: { name: "Interns for northwind", slug: "interns-for-northwind", html_url: "https://github.com/apps/interns-for-northwind", owner: "northwind" }, installations: [{ login: "northwind", type: "Organization", all_repositories: true, suspended: false, enabled: true }, { login: "sam", type: "User", all_repositories: false, suspended: false, enabled: false }], reviewer: { slug: "nia", name: "Nia", has_tool: true }, polling: true, error: null }
     : { connected: false, app: null, installations: [], reviewer: null, polling: false, error: null },
+  instagram: process.env.MOCK_INSTAGRAM ? instagramConnected("northwindstudio") : instagramOff(),
 };
+
+function instagramOff() {
+  return { connected: false, account: null, app_id: null, connected_at: null, token_expires_at: null, missing: [], acting: [], used_by: [], check: null };
+}
+function instagramConnected(username, appId = "1230000000000001") {
+  return { connected: true, account: { username, page: "Northwind Studio" }, app_id: appId, connected_at: new Date().toISOString(), token_expires_at: null, missing: [], acting: ["instagram_manage_comments"], used_by: [{ slug: "milo", name: "Milo" }], check: null };
+}
 
 function outlookView() {
   const c = connectorState;
@@ -61,7 +69,32 @@ function outlookView() {
 function connectorRoute(req, path, json) {
   const c = connectorState;
   const body = () => new Promise((resolve) => { let raw = ""; req.on("data", (d) => (raw += d)); req.on("end", () => resolve(JSON.parse(raw || "{}"))); });
-  if (path === "/connectors" && req.method === "GET") return json(200, { outlook: outlookView(), github: c.github });
+  if (path === "/connectors" && req.method === "GET") return json(200, { outlook: outlookView(), github: c.github, instagram: c.instagram });
+  if (path === "/connectors/instagram" && req.method === "GET") return json(200, c.instagram);
+  if (path === "/connectors/instagram" && req.method === "PUT") {
+    return void body().then((b) => {
+      if (!/^\d{5,20}$/.test(b.app_id ?? "")) return json(400, { error: "That doesn't look like an App ID. It's the long number under App settings › Basic." });
+      if (!b.app_secret && b.app_id !== c.instagram.app_id) return json(400, { error: "Paste the App secret from App settings › Basic (32 letters and digits)." });
+      if ((b.token ?? "").length < 20) return json(400, { error: "Paste the access token from Graph API Explorer." });
+      const used = c.instagram.used_by;
+      c.instagram = { ...instagramConnected((b.username ?? "").replace(/^@/, "") || "northwindstudio", b.app_id), used_by: used };
+      json(200, c.instagram);
+    });
+  }
+  if (path === "/connectors/instagram/check" && req.method === "POST") {
+    c.instagram.check = { at: new Date().toISOString(), ok: true, followers: 1840 };
+    return json(200, c.instagram.check);
+  }
+  if (path === "/connectors/instagram" && req.method === "PATCH") {
+    return void body().then((b) => {
+      for (const [slug, on] of Object.entries(b.interns ?? {})) {
+        c.instagram.used_by = c.instagram.used_by.filter((u) => u.slug !== slug);
+        if (on) c.instagram.used_by.push({ slug, name: interns.find((i) => i.slug === slug)?.name ?? slug });
+      }
+      json(200, c.instagram);
+    });
+  }
+  if (path === "/connectors/instagram" && req.method === "DELETE") return (c.instagram = { ...instagramOff(), used_by: c.instagram.used_by }), json(200, c.instagram);
   if (path === "/connectors/github" && req.method === "GET") return json(200, c.github);
   if (path === "/connectors/outlook/app" && req.method === "PUT") {
     return void body().then((b) => {

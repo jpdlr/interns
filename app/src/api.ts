@@ -355,9 +355,27 @@ export interface GithubConnector {
   error: string | null;
 }
 
+/** Instagram research through the owner's Business/Creator account (GET /connectors/instagram). */
+export interface InstagramConnector {
+  connected: boolean;
+  account: { username: string; page: string | null } | null;
+  app_id: string | null;
+  connected_at: string | null;
+  /** null = doesn't expire */
+  token_expires_at: string | null;
+  /** permissions research needs that the token lacks */
+  missing: string[];
+  /** permissions the token has that could act on the account; research never uses them */
+  acting: string[];
+  used_by: { slug: string; name: string }[];
+  /** the last "Check" from this screen */
+  check: { at: string; ok: boolean; followers?: number; error?: string } | null;
+}
+
 export interface ConnectorsOverview {
   outlook: OutlookConnector;
   github: GithubConnector;
+  instagram: InstagramConnector;
 }
 
 export interface InternWeek {
@@ -1012,6 +1030,28 @@ export class InternsApi {
 
   disconnectGithub(): Promise<GithubConnector> {
     return this.request<GithubConnector>("/connectors/github", { method: "DELETE" });
+  }
+
+  instagramConnector(): Promise<InstagramConnector> {
+    return this.request<InstagramConnector>("/connectors/instagram");
+  }
+
+  /** Connect from a Graph API Explorer token; `app_secret` may be left out when reconnecting the same app. */
+  connectInstagram(input: { app_id: string; app_secret?: string; token: string; username?: string }): Promise<InstagramConnector> {
+    return this.request<InstagramConnector>("/connectors/instagram", { method: "PUT", body: JSON.stringify(input) });
+  }
+
+  checkInstagram(): Promise<NonNullable<InstagramConnector["check"]>> {
+    return this.request("/connectors/instagram/check", { method: "POST" });
+  }
+
+  /** Give or take the research tool. */
+  updateInstagram(interns: Record<string, boolean>): Promise<InstagramConnector> {
+    return this.request<InstagramConnector>("/connectors/instagram", { method: "PATCH", body: JSON.stringify({ interns }) });
+  }
+
+  disconnectInstagram(): Promise<InstagramConnector> {
+    return this.request<InstagramConnector>("/connectors/instagram", { method: "DELETE" });
   }
 
   /** Summary times and quiet hours for the lock screen. */

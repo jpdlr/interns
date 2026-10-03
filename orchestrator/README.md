@@ -101,12 +101,13 @@ posted until **Publish review** is pressed.
 | `POST /capabilities/:id/ready` | Forge reports branch + test results; creates activation card |
 | `POST /github/reviews` | create a review approval card (does not publish) |
 | `POST /webhooks/github` | signed GitHub App events; no bearer token |
-| `GET /connectors` | Outlook (Microsoft app, mailboxes with health and who uses them, sign-ins in progress) and GitHub (app, installations, reviewer) |
+| `GET /connectors` | Outlook (Microsoft app, mailboxes with health and who uses them, sign-ins in progress), GitHub (app, installations, reviewer) and Instagram (account, missing permissions, who researches) |
 | `PUT /connectors/outlook/app` `{client_id, authority?}` | the owner's Entra app registration for device-code sign-in |
 | `POST /connectors/outlook/mailboxes` `{label, mailbox?}` · `GET/DELETE /connectors/outlook/sessions/:id` | start a mailbox sign-in (returns the code to show), poll it, cancel it; `mailbox` reconnects an existing one |
 | `PATCH/DELETE /connectors/outlook/mailboxes/:id` `{label?, calendar?, default?}` · `POST …/:id/check` | rename, calendar, default, disconnect; check access now |
 | `GET/PATCH/DELETE /connectors/github` `{accounts?, reviewer?}` · `POST /connectors/github/sync` | status; reviews per account and the reviewer; refresh installations; disconnect |
 | `POST /connectors/github/setup` `{login, origin}` · `POST /connectors/github/install` `{origin}` | the App manifest to post to github.com; a one-time install link |
+| `GET/PUT/PATCH/DELETE /connectors/instagram` `{app_id, app_secret?, token, username?}` / `{interns}` · `POST /connectors/instagram/check` | Instagram research: status; connect from a Graph API Explorer token (kept as a non-expiring Page token in `instagram/config.json`); who has the `instagram` tool; disconnect; check access now |
 | `GET /oauth/github/callback` · `GET /oauth/github/installed` | browser returns from github.com; no bearer token, single-use 15-minute state required |
 | `GET /push/key` | `{vapid_public}` — for `pushManager.subscribe`'s `applicationServerKey` |
 | `POST /push/subscribe` `{endpoint, keys}` | store a browser PushSubscription (204) |
