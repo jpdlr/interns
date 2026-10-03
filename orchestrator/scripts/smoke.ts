@@ -925,7 +925,8 @@ await check("archive moves intern to _fired", () => {
       assert.equal(body.persona, apiManifest.persona);
       assert.equal(body.system_prompt, apiManifest.system_prompt);
       assert.deepEqual(body.tools, ["fs.read"]);
-      assert.deepEqual(body.triggers, { cron: "0 7 * * 1-5", mentions: true, mail_push: false });
+      assert.deepEqual(body.triggers, { cron: "0 7 * * 1-5", mentions: true, mail_push: false, meeting_brief: false });
+      assert.equal(body.mailboxes, null, "no mailbox limit: every connected one");
       assert.deepEqual(body.backlog, ["item one", "item two"]);
       assert.deepEqual(body.guardrails, { drafts_only: true, daily_token_cap: 100_000 });
       assert.deepEqual(body.spend_today, { input_tokens: 0, output_tokens: 0, cost_usd: 0 });
@@ -1165,7 +1166,7 @@ await check("archive moves intern to _fired", () => {
       assert.equal(body.name, "Nova"); // untouched fields survive the merge
       assert.equal(body.persona, apiManifest.persona);
       assert.deepEqual(body.tools, ["fs.read"]);
-      assert.deepEqual(body.triggers, { cron: "0 7 * * 1-5", mentions: true, mail_push: false });
+      assert.deepEqual(body.triggers, { cron: "0 7 * * 1-5", mentions: true, mail_push: false, meeting_brief: false });
       assert.deepEqual(apiRegistry.get("nova")!.backlog, ["only this item"]);
       assert.deepEqual(apiRegistry.get("nova")!.tools, ["fs.read"]);
     });
@@ -1176,7 +1177,7 @@ await check("archive moves intern to _fired", () => {
         body: { triggers: { mentions: false } },
       });
       assert.equal(status, 200);
-      assert.deepEqual(body.triggers, { cron: "0 7 * * 1-5", mentions: false, mail_push: false });
+      assert.deepEqual(body.triggers, { cron: "0 7 * * 1-5", mentions: false, mail_push: false, meeting_brief: false });
     });
 
     await check("PATCH manifest: explicit null clears the cron trigger", async () => {
@@ -1185,7 +1186,7 @@ await check("archive moves intern to _fired", () => {
         body: { triggers: { cron: null } },
       });
       assert.equal(status, 200);
-      assert.deepEqual(body.triggers, { cron: null, mentions: false, mail_push: false });
+      assert.deepEqual(body.triggers, { cron: null, mentions: false, mail_push: false, meeting_brief: false });
       assert.equal(apiRegistry.get("nova")!.triggers.cron, undefined);
     });
 
