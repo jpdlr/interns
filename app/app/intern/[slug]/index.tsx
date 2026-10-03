@@ -44,6 +44,9 @@ export default function InternProfile() {
   const [week, setWeek] = useState<InternWeek | null>(null);
   const pages = useInternPages(slug ?? "");
   const shortcuts = pages.filter((p) => p.kind !== "draft");
+  const [gridWidth, setGridWidth] = useState(0);
+  /** four equal tiles per row */
+  const tileWidth = gridWidth ? Math.floor((gridWidth - 3 * space.sm) / 4) : undefined;
   /** connected mailbox labels, for the Mailboxes row */
   const [mailboxLabels, setMailboxLabels] = useState<Record<string, string> | null>(null);
   const outlookUser = Boolean(manifest && (manifest.tools.includes("mail") || manifest.tools.includes("calendar")));
@@ -170,7 +173,7 @@ export default function InternProfile() {
       <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + space.xxl }]}>
         <View style={styles.header}>
           <Pressable onPress={() => setPicking(true)} accessibilityRole="button" accessibilityLabel="Change face">
-            <InternFace id={faceId} size={88} clipToBounds />
+            <InternFace id={faceId} size={76} clipToBounds />
           </Pressable>
           <Text variant="display" center>
             {manifest.name}
@@ -185,26 +188,23 @@ export default function InternProfile() {
               </Text>
             </View>
           ) : null}
-          <View style={styles.actions}>
-            <QuickAction label="Chat" icon={<ChatIcon size={18} color={colors.text} />} onPress={() => router.push(`/chat/${slug}` as never)} />
-            <QuickAction label="Files" icon={<PaperclipIcon size={18} color={colors.text} />} onPress={() => router.push(`/files/${slug}` as never)} />
+          {/* Chat, Files and their living pages (people, boards, tables, lists), four to a row; drafts stay in Pages below. */}
+          <View style={styles.grid} onLayout={(e) => setGridWidth(e.nativeEvent.layout.width)}>
+            <QuickAction width={tileWidth} label="Chat" icon={<ChatIcon size={18} color={colors.text} />} onPress={() => router.push(`/chat/${slug}` as never)} />
+            <QuickAction width={tileWidth} label="Files" icon={<PaperclipIcon size={18} color={colors.text} />} onPress={() => router.push(`/files/${slug}` as never)} />
+            {shortcuts.map((page) => {
+              const Glyph = PAGE_GLYPH[page.kind] ?? ListIcon;
+              return (
+                <QuickAction
+                  key={page.id}
+                  width={tileWidth}
+                  label={page.title}
+                  icon={<Glyph size={18} color={colors.text} />}
+                  onPress={() => router.push(`/page/${page.id}` as never)}
+                />
+              );
+            })}
           </View>
-          {shortcuts.length ? (
-            // Their living pages (people, boards, tables, lists) one tap away; drafts stay in Pages below.
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.shortcutScroll} contentContainerStyle={styles.shortcuts}>
-              {shortcuts.map((page) => {
-                const Glyph = PAGE_GLYPH[page.kind] ?? ListIcon;
-                return (
-                  <QuickAction
-                    key={page.id}
-                    label={page.title}
-                    icon={<Glyph size={18} color={colors.text} />}
-                    onPress={() => router.push(`/page/${page.id}` as never)}
-                  />
-                );
-              })}
-            </ScrollView>
-          ) : null}
           <View style={styles.budget} accessibilityLabel={`Today ${shortTokens(spent)} of ${shortTokens(cap)} tokens`}>
             <View style={[styles.bar, { backgroundColor: colors.surfaceAlt }]}>
               <View style={[styles.barFill, { width: `${Math.max(used * 100, spent ? 2 : 0)}%`, backgroundColor: used >= 0.9 ? colors.urgent : used >= 0.7 ? colors.action : colors.accent }]} />
@@ -340,14 +340,14 @@ function ThisWeek({ week }: { week: InternWeek }) {
 
 const PAGE_GLYPH: Partial<Record<PageKind, typeof ListIcon>> = { people: UsersIcon, board: BoardIcon, table: TableIcon, list: ListIcon };
 
-function QuickAction({ label, icon, onPress }: { label: string; icon: React.ReactNode; onPress: () => void }) {
+function QuickAction({ label, icon, onPress, width }: { label: string; icon: React.ReactNode; onPress: () => void; width?: number }) {
   const { colors } = useAppTheme();
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
-      style={({ pressed }) => [styles.quick, { backgroundColor: pressed ? colors.accentSoft : colors.surfaceAlt }]}
+      style={({ pressed }) => [styles.quick, width ? { width } : styles.quickFallback, { backgroundColor: pressed ? colors.accentSoft : colors.surfaceAlt }]}
     >
       {icon}
       <Text variant="caption" color={colors.text} style={styles.quickLabel} numberOfLines={1}>
@@ -359,12 +359,12 @@ function QuickAction({ label, icon, onPress }: { label: string; icon: React.Reac
 
 const styles = StyleSheet.create({
   body: { padding: space.lg, gap: space.xl },
-  header: { alignItems: "center", gap: space.xs, paddingTop: space.sm },
+  header: { alignItems: "center", gap: space.xs, marginTop: -space.md },
   role: { maxWidth: 320 },
-  actions: { flexDirection: "row", gap: space.sm, marginTop: space.md },
-  shortcutScroll: { alignSelf: "stretch", marginHorizontal: -space.lg, marginTop: space.sm },
-  shortcuts: { flexGrow: 1, justifyContent: "center", gap: space.sm, paddingHorizontal: space.lg },
-  quick: { minWidth: 88, alignItems: "center", gap: 4, paddingVertical: space.sm, paddingHorizontal: space.lg, borderRadius: radius.lg, maxWidth: 168 },
+  grid: { alignSelf: "stretch", flexDirection: "row", flexWrap: "wrap", gap: space.sm, marginTop: space.md },
+  quick: { alignItems: "center", gap: 4, paddingVertical: space.sm, paddingHorizontal: space.xs, borderRadius: radius.lg },
+  /** before the grid is measured (first frame) */
+  quickFallback: { width: "22%" },
   quickLabel: { fontWeight: "600" },
   budget: { alignSelf: "stretch", gap: 6, marginTop: space.md, paddingHorizontal: space.xl },
   pausedPill: { marginTop: space.xs, paddingHorizontal: space.md, paddingVertical: 3, borderRadius: radius.pill },
