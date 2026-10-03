@@ -6,6 +6,15 @@ and versions follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Google Photos connector.** Share albums or photos with the crew through Google's own picker
+  (Google no longer lets apps read a whole library). Picked photos are copied to your server
+  (`$INTERNS_HOME/photos`), so interns with the new `photos` tool can browse them any time:
+  `photo-library` makes numbered contact sheets, lists them, and keeps tags and picks. Setup is
+  your own Google Cloud OAuth client; the app shows the steps and the redirect address. Only
+  the picker permission is requested.
+- **`ig-research --sheet`** draws an account's or a hashtag's posts as one contact sheet, so
+  interns can compare looks visually, for example to find accounts and feature pages with a
+  style like yours. Pillow is now in `tools/requirements.txt`.
 - **Writing cards.** Text meant to be pasted somewhere (a bio, caption, post or email) shows as
   a clean card in the reading font, wrapped, with Copy and Edit, not as a monospace code box.
   Labelled alternatives (`**My pick — 138 chars**` above each block) share one card behind

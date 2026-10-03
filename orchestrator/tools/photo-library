@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""photo-library — the photos the owner shared from Google Photos.
+
+The Google Photos connector (src/photos.ts) copies every photo the owner picks
+into $INTERNS_HOME/photos (library.json, img/, thumb/). This tool only reads
+those copies, plus tags.json, where interns record what each photo is.
+
+  photo-library stats                              counts, tags, date range
+  photo-library list [--untagged|--tag T|--picks] [--limit N]   JSON lines: id, date, camera, tags, note, paths
+  photo-library sheet [--untagged|--tag T|--picks|--ids a,b] [--limit 12] [--out P]
+                                                   a numbered contact sheet; open the printed path with Read
+  photo-library tag <id|sheet-number> --tags a,b [--note "..."] [--pick]
+                                                   numbers refer to the last sheet you made
+
+Every command prints JSON; failures print {"error": "..."} and exit 1.
+"""
+import argparse, json, os, sys, tempfile, time
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+
+HOME = os.environ.get("INTERNS_HOME") or os.path.join(os.path.expanduser("~"), ".interns")
+DIR = os.path.join(HOME, "photos")
+INTERN = os.environ.get("INTERNS_INTERN") or "intern"
+
+
+def die(msg):
+    print(json.dumps({"error": msg}))
+    sys.exit(1)
+
+
+def load(name, default):
+    try:
+        with open(os.path.join(DIR, name)) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def save(name, data):
+    os.makedirs(DIR, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=DIR, prefix=f".{name}.")
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f, indent=1)
+    os.replace(tmp, os.path.join(DIR, name))
+
+
+def items():
+    return load("library.json", {}).get("items", [])
+
+
+def tags():
+    return load("tags.json", {})
+
+
+def view(item, t):
+    meta = t.get(item["id"], {})
+    return {
+        "id": item["id"],
+        "date": (item.get("created_at") or "")[:10] or None,
+        "type": item.get("type"),
+        "camera": item.get("camera"),
+        "size": f'{item.get("width")}x{item.get("height")}' if item.get("width") else None,
+        "tags": meta.get("tags", []),
+        "note": meta.get("note", ""),
+        "pick": bool(meta.get("pick")),
+        "image": os.path.join(DIR, item["file"]),
+        "thumb": os.path.join(DIR, item["thumb"]),
+    }
+
+
+def select(args):
+    t = tags()
+    rows = sorted(items(), key=lambda i: i.get("created_at") or "", reverse=True)
+    if getattr(args, "ids", None):
+        wanted = [x.strip() for x in args.ids.split(",") if x.strip()]
+        by = {i["id"]: i for i in rows}
+        rows = [by[w] for w in wanted if w in by]
+    elif args.untagged:
+        rows = [i for i in rows if not t.get(i["id"], {}).get("tags")]
+    elif args.tag:
+        rows = [i for i in rows if args.tag.lower() in [x.lower() for x in t.get(i["id"], {}).get("tags", [])]]
+    elif args.picks:
+        rows = [i for i in rows if t.get(i["id"], {}).get("pick")]
+    return [view(i, t) for i in rows[: args.limit]]
+
+
+def cmd_stats(_args):
+    all_items, t = items(), tags()
+    dates = sorted(d for d in ((i.get("created_at") or "")[:10] for i in all_items) if d)
+    counts = {}
+    for meta in t.values():
+        for tag in meta.get("tags", []):
+            counts[tag] = counts.get(tag, 0) + 1
+    print(json.dumps({
+        "photos": sum(1 for i in all_items if i.get("type") == "photo"),
+        "videos": sum(1 for i in all_items if i.get("type") == "video"),
+        "tagged": sum(1 for i in all_items if t.get(i["id"], {}).get("tags")),
+        "picks": sum(1 for i in all_items if t.get(i["id"], {}).get("pick")),
+        "from": dates[0] if dates else None,
+        "to": dates[-1] if dates else None,
+        "top_tags": sorted(counts.items(), key=lambda kv: -kv[1])[:25],
+    }))
+
+
+def cmd_list(args):
+    rows = select(args)
+    if not rows:
+        die("no photos match" if items() else "no photos have been shared yet")
+    for r in rows:
+        print(json.dumps(r))
+
+
+def cmd_sheet(args):
+    from _sheet import contact_sheet
+
+    rows = select(args)
+    if not rows:
+        die("no photos match" if items() else "no photos have been shared yet")
+    out = args.out or os.path.join(DIR, "sheets", f"{INTERN}-{int(time.time())}.jpg")
+    try:
+        placed = contact_sheet([r["thumb"] for r in rows], out)
+    except ImportError:
+        die("Pillow isn't installed (pip install -r orchestrator/tools/requirements.txt)")
+    shown = [r for r in rows if r["thumb"] in placed]
+    numbers = {str(n + 1): r["id"] for n, r in enumerate(shown)}
+    state = load("sheets.json", {})
+    state[INTERN] = numbers
+    save("sheets.json", state)
+    print(json.dumps({"sheet": out, "count": len(shown), "photos": [{"n": n + 1, "id": r["id"], "date": r["date"], "tags": r["tags"]} for n, r in enumerate(shown)]}))
+
+
+def cmd_tag(args):
+    ref = args.photo
+    ident = load("sheets.json", {}).get(INTERN, {}).get(ref) if ref.isdigit() else ref
+    if not ident or ident not in {i["id"] for i in items()}:
+        die(f"no photo {ref}" + (" on your last sheet" if ref.isdigit() else ""))
+    t = tags()
+    meta = t.get(ident, {})
+    if args.tags is not None:
+        meta["tags"] = sorted({x.strip().lower() for x in args.tags.split(",") if x.strip()})
+    if args.note is not None:
+        meta["note"] = args.note.strip()[:500]
+    if args.pick:
+        meta["pick"] = True
+    if args.unpick:
+        meta["pick"] = False
+    meta["by"], meta["at"] = INTERN, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    t[ident] = meta
+    save("tags.json", t)
+    print(json.dumps({"id": ident, **meta}))
+
+
+def main():
+    p = argparse.ArgumentParser(prog="photo-library", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("stats")
+    for name in ("list", "sheet"):
+        s = sub.add_parser(name)
+        g = s.add_mutually_exclusive_group()
+        g.add_argument("--untagged", action="store_true")
+        g.add_argument("--tag")
+        g.add_argument("--picks", action="store_true")
+        if name == "sheet":
+            g.add_argument("--ids")
+            s.add_argument("--out")
+        s.add_argument("--limit", type=int, default=12 if name == "sheet" else 50)
+    t = sub.add_parser("tag")
+    t.add_argument("photo")
+    t.add_argument("--tags")
+    t.add_argument("--note")
+    t.add_argument("--pick", action="store_true")
+    t.add_argument("--unpick", action="store_true")
+    args = p.parse_args()
+    if args.cmd in ("list", "sheet"):
+        args.limit = max(1, min(args.limit, 40 if args.cmd == "sheet" else 500))
+    {"stats": cmd_stats, "list": cmd_list, "sheet": cmd_sheet, "tag": cmd_tag}[args.cmd](args)
+
+
+if __name__ == "__main__":
+    main()

@@ -413,10 +413,35 @@ export interface InstagramConnector {
   check: { at: string; ok: boolean; followers?: number; error?: string } | null;
 }
 
+/** A Google Photos picker session: the owner picks in Google's page, then it imports. */
+export interface PhotoPick {
+  id: string;
+  picker_uri: string;
+  state: "waiting" | "importing" | "done" | "failed" | "expired";
+  total: number;
+  imported: number;
+  skipped: number;
+  error: string | null;
+  started_at: string;
+}
+
+/** Photos shared from Google Photos into the crew's library (GET /connectors/google-photos). */
+export interface GooglePhotosConnector {
+  app: { configured: boolean; client_id: string | null };
+  connected: boolean;
+  /** Google signed us out (testing-mode sign-ins last a week) */
+  needs_reconnect: boolean;
+  connected_at: string | null;
+  library: { count: number; photos: number; last_import: string | null };
+  interns: { slug: string; name: string; enabled: boolean }[];
+  sessions: PhotoPick[];
+}
+
 export interface ConnectorsOverview {
   outlook: OutlookConnector;
   github: GithubConnector;
   instagram: InstagramConnector;
+  google_photos: GooglePhotosConnector | null;
 }
 
 export interface InternWeek {
@@ -1084,6 +1109,39 @@ export class InternsApi {
 
   disconnectGithub(): Promise<GithubConnector> {
     return this.request<GithubConnector>("/connectors/github", { method: "DELETE" });
+  }
+
+  googlePhotos(): Promise<GooglePhotosConnector> {
+    return this.request<GooglePhotosConnector>("/connectors/google-photos");
+  }
+
+  setGooglePhotosApp(input: { client_id: string; client_secret: string }): Promise<GooglePhotosConnector> {
+    return this.request<GooglePhotosConnector>("/connectors/google-photos/app", { method: "PUT", body: JSON.stringify(input) });
+  }
+
+  /** Where to send the browser to sign in with Google; it comes back to this origin. */
+  googlePhotosSignIn(origin: string): Promise<{ url: string }> {
+    return this.request("/connectors/google-photos/connect", { method: "POST", body: JSON.stringify({ origin }) });
+  }
+
+  startPhotoPick(): Promise<PhotoPick> {
+    return this.request<PhotoPick>("/connectors/google-photos/sessions", { method: "POST", body: "{}" });
+  }
+
+  photoPick(id: string): Promise<PhotoPick> {
+    return this.request<PhotoPick>(`/connectors/google-photos/sessions/${encodeURIComponent(id)}`);
+  }
+
+  cancelPhotoPick(id: string): Promise<{ ok: boolean }> {
+    return this.request(`/connectors/google-photos/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  updateGooglePhotos(interns: Record<string, boolean>): Promise<GooglePhotosConnector> {
+    return this.request<GooglePhotosConnector>("/connectors/google-photos", { method: "PATCH", body: JSON.stringify({ interns }) });
+  }
+
+  disconnectGooglePhotos(opts: { library?: boolean } = {}): Promise<GooglePhotosConnector> {
+    return this.request<GooglePhotosConnector>(`/connectors/google-photos${opts.library ? "?library=1" : ""}`, { method: "DELETE" });
   }
 
   instagramConnector(): Promise<InstagramConnector> {

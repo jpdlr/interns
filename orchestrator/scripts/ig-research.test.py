@@ -4,7 +4,7 @@
 
 No network: IG_GRAPH_BASE points the tool at a server on 127.0.0.1.
 """
-import json, os, subprocess, tempfile, threading
+import io, json, os, subprocess, tempfile, threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -26,6 +26,16 @@ class FakeGraph(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
+        if url.path.startswith("/img/"):
+            from PIL import Image
+            buf = io.BytesIO()
+            Image.new("RGB", (640, 640), (200, 120, 40)).save(buf, "JPEG")
+            raw = buf.getvalue()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            return self.wfile.write(raw)
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         requests.append((url.path, q))
         if q.get("access_token") != "PAGE-TOKEN":
@@ -37,8 +47,8 @@ class FakeGraph(BaseHTTPRequestHandler):
             return self.send(200, {"business_discovery": {
                 "username": "rival", "name": "Rival Co", "followers_count": 1000, "media_count": 3, "id": "ig9",
                 "media": {"data": [
-                    {"id": "m1", "caption": "x" * 1500, "like_count": 40, "comments_count": 10, "media_type": "IMAGE"},
-                    {"id": "m2", "caption": "hidden likes", "comments_count": 2, "media_type": "VIDEO"},
+                    {"id": "m1", "caption": "x" * 1500, "like_count": 40, "comments_count": 10, "media_type": "IMAGE", "media_url": f"{base}/img/m1.jpg"},
+                    {"id": "m2", "caption": "hidden likes", "comments_count": 2, "media_type": "VIDEO", "media_url": f"{base}/video.mp4", "thumbnail_url": f"{base}/img/m2.jpg"},
                 ]}}, "id": "ig1"})
         if url.path == "/ig1":
             return self.send(200, {"username": "studio", "name": "Studio", "followers_count": 12, "media_count": 3, "id": "ig1"})
@@ -92,7 +102,12 @@ code, out = run("profile", "@rival", "--posts", "2")
 check("profile: business discovery with the posts asked for", code == 0 and out["username"] == "rival" and len(out["recent_posts"]) == 2, out)
 check("profile: media.limit is passed", "media.limit(2)" in requests[-1][1]["fields"], requests[-1])
 check("profile: long captions are trimmed", len(out["recent_posts"][0]["caption"]) == 1001 and out["recent_posts"][0]["caption"].endswith("…"))
+check("profile: image URLs are left out of the answer", all("media_url" not in p and "thumbnail_url" not in p for p in out["recent_posts"]), out["recent_posts"])
 check("profile: engagement skips hidden likes", out["engagement"] == {"posts_counted": 2, "avg_likes": 40.0, "avg_comments": 6.0, "engagement_rate_pct": 4.6, "likes_hidden_on": 1}, out["engagement"])
+
+code, out = run("profile", "rival", "--posts", "2", "--sheet")
+check("profile --sheet: the posts as one contact sheet (a video by its cover)", code == 0 and out.get("sheet", {}).get("images") == 2 and os.path.exists(out["sheet"]["path"]), out.get("sheet"))
+check("profile --sheet: kept under INTERNS_HOME", out.get("sheet", {}).get("path", "").startswith(os.path.join(home, "instagram", "sheets")), out.get("sheet"))
 
 code, out = run("profile", "personalfriend")
 check("profile: a personal account is explained", code == 1 and "Personal and private accounts" in out["error"], out)

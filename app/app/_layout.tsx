@@ -105,6 +105,7 @@ function AppNavigation() {
               <Stack.Screen name="connectors/outlook" options={{ title: "Outlook" }} />
               <Stack.Screen name="connectors/github" options={{ title: "GitHub" }} />
               <Stack.Screen name="connectors/instagram" options={{ title: "Instagram" }} />
+              <Stack.Screen name="connectors/google-photos" options={{ title: "Google Photos" }} />
               <Stack.Screen name="page/[id]" options={{ title: "" }} />
               <Stack.Screen name="history" options={{ title: "History" }} />
             </Stack>

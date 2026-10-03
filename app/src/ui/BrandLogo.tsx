@@ -13,6 +13,7 @@ export type Brand =
   | "outlook"
   | "github"
   | "instagram"
+  | "google-photos"
   | "microsoft"
   | "discord"
   | "clickup"
@@ -33,6 +34,7 @@ export const TOOL_BRAND: Record<string, Brand> = {
   calendar: "outlook",
   github: "github",
   instagram: "instagram",
+  photos: "google-photos",
 };
 
 export function BrandLogo({ brand, size = 24, style }: { brand: Brand; size?: number; style?: ViewStyle }) {

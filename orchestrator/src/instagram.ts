@@ -101,10 +101,12 @@ export function instagramPrompt(manifest: InternManifest, home: string, owner = 
   return `
 ## Instagram research (read only)
 You can research Instagram through @${connection.ig_username || "the owner's account"}, ${owner}'s connected account:
-  ${cli} profile <username> [--posts 12]    # a public Business or Creator account: bio, followers, recent posts with likes/comments, engagement
-  ${cli} hashtag <tag> [--recent] [--limit 15]   # top posts for a hashtag, or the newest with --recent
+  ${cli} profile <username> [--posts 12] [--sheet]   # a public Business or Creator account: bio, followers, recent posts with likes/comments, engagement
+  ${cli} hashtag <tag> [--recent] [--limit 15] [--sheet]   # top posts for a hashtag, or the newest with --recent
   ${cli} quota                              # hashtags searched in the last 7 days
 Limits Instagram sets: personal and private accounts can't be looked up; hashtag results don't say who posted (open the permalink); only 30 different hashtags per rolling 7 days for the whole crew. Run quota before a batch of hashtag searches, reuse hashtags already searched (free), and pick hashtags deliberately rather than trying many.
+--sheet also draws the posts' images as one numbered contact sheet; open its path with Read to judge an account's look at a glance instead of guessing from captions.
+To find accounts with a style like ${owner}'s, describe that style first (from ${owner}'s own photos or posts), then look through hashtags that kind of photo lives under and the accounts behind the strongest posts, and compare their sheets. Feature and curator accounts (ones that repost others' photos, often with "tag us" or "submit" in the bio) are worth flagging separately: say how they take submissions.
 This is research only: never post, comment, like, follow or message anyone. Cite the post or profile links you base findings on, and keep a page (table or board) when ${owner} asks for ongoing tracking.`;
 }
 

@@ -12,6 +12,7 @@ import { notFoundPage, resolvePage } from "./appshell.js";
 import { DEFAULT_STYLE, StyleSchema } from "./style.js";
 import { learnedView, ownerSetStyle, reactTo, ReactionError, undoStyleChange } from "./reactions.js";
 import { registerConnectorRoutes, unknownMailboxes, type ConnectorService } from "./connectors.js";
+import { registerPhotosRoutes, type GooglePhotos } from "./photos.js";
 import { z } from "zod";
 import type { ApprovalService } from "./approvals.js";
 import {
@@ -245,6 +246,8 @@ export async function startApi(deps: {
   interviewFn?: InterviewFn;
   /** Connectors (Outlook sign-in, GitHub App): its routes live in connectors.ts */
   connectors?: ConnectorService;
+  /** Google Photos picker and library (photos.ts) */
+  photos?: GooglePhotos;
 }): Promise<FastifyInstance> {
   const { db, registry, bus, config, discord, push, approvals, capabilities, github, orchestrator } = deps;
   const calendar = deps.calendar ?? cachedCalendar(calendarMailbox(config));
@@ -1048,6 +1051,7 @@ export async function startApi(deps: {
 
   // Icon + tool catalogs the app's pickers render from, so they never drift from the backend's source of truth.
   if (deps.connectors) registerConnectorRoutes(app, deps.connectors);
+  if (deps.photos) registerPhotosRoutes(app, deps.photos);
 
   app.get("/meta", async () => {
     return { icons: ICONS, tools: INTERN_ASSIGNABLE_TOOL_NAMES };

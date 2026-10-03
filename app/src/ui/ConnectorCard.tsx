@@ -37,6 +37,16 @@ export function instagramSummary(i: ConnectorsOverview["instagram"]): { text: st
   return { text: `@${i.account.username} · ${i.used_by.map((u) => u.name).join(", ")}`, tone: "ok" };
 }
 
+export function googlePhotosSummary(g: ConnectorsOverview["google_photos"]): { text: string; tone: ConnectorTone } {
+  if (!g || !g.app.configured) return { text: "Not set up", tone: "off" };
+  if (g.needs_reconnect) return { text: "Needs connecting again", tone: "attention" };
+  if (!g.connected) return { text: "Not connected", tone: "off" };
+  const users = g.interns.filter((i) => i.enabled).map((i) => i.name);
+  const count = `${g.library.count} photo${g.library.count === 1 ? "" : "s"} shared`;
+  if (!users.length) return { text: `${count} · nobody uses them yet`, tone: "attention" };
+  return { text: `${count} · ${users.join(", ")}`, tone: "ok" };
+}
+
 export function ConnectorCard({
   icon,
   title,

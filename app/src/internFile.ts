@@ -10,7 +10,7 @@ import { DEFAULT_STYLE } from "./style";
 import { useSettings } from "./settings";
 
 /** Used only if GET /meta fails — mirrors orchestrator/src/engine.ts TOOL_CATALOG keys. */
-export const FALLBACK_TOOLS = ["fs.read", "fs.write", "shell", "web", "notebook", "todo", "mail", "calendar", "cards", "instagram"];
+export const FALLBACK_TOOLS = ["fs.read", "fs.write", "shell", "web", "notebook", "todo", "mail", "calendar", "cards", "instagram", "photos"];
 
 /** What each tool lets an intern do, in plain words. */
 export const TOOL_INFO: Record<string, { label: string; detail: string }> = {
@@ -25,6 +25,7 @@ export const TOOL_INFO: Record<string, { label: string; detail: string }> = {
   cards: { label: "Cards", detail: "Ask you to decide things with cards" },
   github: { label: "GitHub", detail: "Read pull requests, propose reviews" },
   instagram: { label: "Instagram research", detail: "Look up public accounts and hashtags — never posts" },
+  photos: { label: "Your photos", detail: "Photos you share from Google Photos" },
   "integration.build": { label: "Build integrations", detail: "Forge's build tooling" },
 };
 
