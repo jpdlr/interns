@@ -204,6 +204,11 @@ export type Attachment = z.infer<typeof AttachmentSchema>;
 
 // ----------------------------------------------------------------- messages
 
+/** The owner's one-tap verdicts on an intern's message (reactions.ts). */
+export const REACTIONS = ["perfect", "too_long", "too_short", "too_formal", "too_casual", "missed"] as const;
+export const ReactionSchema = z.enum(REACTIONS);
+export type Reaction = z.infer<typeof ReactionSchema>;
+
 export const MessageSchema = z.object({
   id: z.string(),
   /** thread key: an intern slug (JP's 1:1 thread) or a room id (`room-…`, group chat) */
@@ -215,6 +220,8 @@ export const MessageSchema = z.object({
   reply_to: z.string().nullable().default(null),
   /** pinned by JP: shown in the thread's pinned bar */
   pinned: z.coerce.boolean().default(false),
+  /** the owner's reaction to an intern's message: too long, too formal… (reactions.ts) */
+  reaction: ReactionSchema.nullable().default(null),
   text: z.string(),
   ts: z.string(), // ISO 8601
   surface: z.enum(["app", "discord", "system"]),

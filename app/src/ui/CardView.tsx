@@ -16,6 +16,8 @@ import { Button, type ButtonTone } from "./Button";
 import { CheckIcon, ChevronDownIcon } from "./Icons";
 import { InternFace, resolveFaceId } from "./InternFace";
 import { cleanMessagePreview, Markdown } from "./Markdown";
+import { DIALS } from "../style";
+import { Dial } from "./hire/Dial";
 import { Text } from "./Text";
 
 const TONE_BY_STYLE: Record<CardAction["style"], ButtonTone> = {
@@ -245,6 +247,8 @@ export function CardView({ card, faceId, internName, onAction, onResolved, highl
 
           {github ? <GithubReviewSummary review={github} expanded={expanded} /> : null}
 
+          <StyleMove card={card} />
+
           {!resolved && !queued && github && card.actions.length ? (
             <View style={styles.actions}>
               {card.actions.map((action) => (
@@ -366,6 +370,24 @@ interface GithubReviewContext {
   inlineComments: number;
 }
 
+/**
+ * An intern moved (or asks to move) a personality dial because of the
+ * owner's reactions: the dial, with where it was drawn dashed.
+ */
+function StyleMove({ card }: { card: Card }) {
+  const context = card.context ?? {};
+  if (context.kind !== "style_suggest" && context.kind !== "style_changed") return null;
+  const dial = DIALS.find((d) => d.key === context.dial);
+  const from = Number(context.from);
+  const to = Number(context.to);
+  if (!dial || !from || !to) return null;
+  return (
+    <View style={styles.styleMove}>
+      <Dial title={dial.title} low={dial.low} high={dial.high} steps={dial.steps} value={to} ghost={from} valueText={`${dial.steps[from - 1]} → ${dial.steps[to - 1]}`} />
+    </View>
+  );
+}
+
 function githubReviewContext(card: Card): GithubReviewContext | null {
   const context = card.context ?? {};
   if (context.type !== "github_review" || typeof context.repository !== "string") return null;
@@ -485,6 +507,7 @@ function resolvedLabel(resolved: Card, original: Card): string {
 }
 
 const styles = StyleSheet.create({
+  styleMove: { marginTop: space.md },
   swipeHint: { position: "absolute", top: 0, bottom: 0, justifyContent: "center", paddingHorizontal: space.lg },
   swipeHintRight: { left: 0 },
   swipeHintLeft: { right: 0 },

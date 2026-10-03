@@ -800,6 +800,31 @@ await check("archive moves intern to _fired", () => {
       assert.equal(rendered.text, "Intro\n\n(chart 1 attached)\n\nand\n\n(drawing 2 attached)\n\n(diagram — open the app)\ndone");
     });
 
+    await check("reactions: react to an intern's message, see it in Learned, and a hand-set dial makes it ask first", async () => {
+      const mine = await apiFetch("/interns/nova/messages", { method: "POST", body: { text: "too long?" } });
+      for (const t of apiDb.nextQueuedTasks()) apiDb.markTask(t.id, "cancelled", "test cleanup");
+      assert.equal((await apiFetch(`/messages/${mine.body.message.id}/reaction`, { method: "POST", body: { reaction: "too_long" } })).status, 400, "not on the owner's own message");
+      const nope = await apiFetch("/messages/nope/reaction", { method: "POST", body: { reaction: "too_long" } });
+      assert.equal(nope.status, 404, JSON.stringify(nope.body));
+      const said = apiDb.addMessage({ intern: "nova", author: "intern", speaker: "nova", text: "A long answer.", surface: "app" });
+      assert.equal((await apiFetch(`/messages/${said.id}/reaction`, { method: "POST", body: { reaction: "meh" } })).status, 400);
+      const reacted = await apiFetch(`/messages/${said.id}/reaction`, { method: "POST", body: { reaction: "too_long" } });
+      assert.equal(reacted.status, 200);
+      assert.equal(reacted.body.message.reaction, "too_long");
+      assert.equal(reacted.body.change, null);
+      const thread = await apiFetch("/interns/nova/messages");
+      assert.equal(thread.body.find((m: any) => m.id === said.id).reaction, "too_long", "the badge survives a reload");
+      let learned = await apiFetch("/interns/nova/learned");
+      assert.equal(learned.body.week.too_long, 1);
+      assert.deepEqual(learned.body.asks_first, { tone: false, length: false });
+      await apiFetch("/interns/nova/manifest", { method: "PATCH", body: { style: { tone: 4 } } });
+      learned = await apiFetch("/interns/nova/learned");
+      assert.deepEqual(learned.body.asks_first, { tone: true, length: false });
+      assert.equal((await apiFetch("/interns/nova/learned/nope/undo", { method: "POST", body: {} })).status, 404);
+      await apiFetch(`/messages/${said.id}/reaction`, { method: "POST", body: { reaction: null } });
+      assert.equal(apiDb.getMessage(said.id)!.reaction, null);
+    });
+
     await check("pins + scratchpad: pin a message, list pins, edit/append the room pad with a system note", async () => {
       const posted = await apiFetch("/interns/nova/messages", { method: "POST", body: { text: "pin me: https://example.com/login" } });
       for (const t of apiDb.nextQueuedTasks()) apiDb.markTask(t.id, "cancelled", "test cleanup");

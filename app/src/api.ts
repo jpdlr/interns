@@ -131,11 +131,52 @@ export interface Message {
   reply_to?: string | null;
   /** pinned by JP: shown in the thread's pinned bar */
   pinned?: boolean;
+  /** the owner's reaction to an intern's message (teach by reacting) */
+  reaction?: Reaction | null;
   text: string;
   /** ISO 8601 */
   ts: string;
   surface: MessageSurface;
   attachments: Attachment[];
+}
+
+/** One-tap verdicts on an intern's message; enough of one kind moves a personality dial. */
+export type Reaction = "perfect" | "too_long" | "too_short" | "too_formal" | "too_casual" | "missed";
+
+/** A dial an intern moved because of the owner's reactions (or asked to, and the owner agreed). */
+export interface StyleChange {
+  id: string;
+  intern: string;
+  dial: "tone" | "length";
+  from_value: number;
+  to_value: number;
+  reaction: Reaction;
+  reactions: number;
+  asked: boolean;
+  created_at: string;
+  undone_at: string | null;
+}
+
+export interface ReactResult {
+  message: Message;
+  /** the dial the intern just moved on its own */
+  change: StyleChange | null;
+  /** "I've made myself briefer" (with Undo) or "Should I keep it shorter?" */
+  card: Card | null;
+}
+
+/** GET /interns/:slug/learned: what the intern has learned from the owner's reactions. */
+export interface Learned {
+  /** messages looked at, and how many of one reaction move a dial */
+  window: number;
+  threshold: number;
+  /** reactions in the last seven days */
+  week: Partial<Record<Reaction, number>>;
+  /** reactions counting towards the next move */
+  progress: { reaction: Reaction; dial: "tone" | "length"; count: number }[];
+  /** dials the intern asks about before moving (after an undo or a hand edit) */
+  asks_first: { tone: boolean; length: boolean };
+  changes: StyleChange[];
 }
 
 export interface CardAction {
@@ -797,6 +838,19 @@ export class InternsApi {
 
   pinMessage(id: string, pinned: boolean): Promise<Message> {
     return this.request<Message>(`/messages/${encodeURIComponent(id)}/pin`, { method: "POST", body: JSON.stringify({ pinned }) });
+  }
+
+  /** React to an intern's message (null takes it back). */
+  react(id: string, reaction: Reaction | null): Promise<ReactResult> {
+    return this.request<ReactResult>(`/messages/${encodeURIComponent(id)}/reaction`, { method: "POST", body: JSON.stringify({ reaction }) });
+  }
+
+  learned(slug: string): Promise<Learned> {
+    return this.request<Learned>(`/interns/${encodeURIComponent(slug)}/learned`);
+  }
+
+  undoStyleChange(slug: string, id: string): Promise<StyleChange> {
+    return this.request<StyleChange>(`/interns/${encodeURIComponent(slug)}/learned/${encodeURIComponent(id)}/undo`, { method: "POST" });
   }
 
   listPins(thread: string): Promise<Message[]> {

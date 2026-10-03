@@ -10,7 +10,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { nameConflict, useCrew } from "../../../src/crew";
-import type { MailboxStatus } from "../../../src/api";
+import type { Learned, MailboxStatus, StyleChange } from "../../../src/api";
 import { changedPatch, FALLBACK_TOOLS, formFromManifest, NOTIFY_INFO, NOTIFY_LEVELS, notifyStatsLine, shortTokens, TOOL_INFO, useInternFile, wordCount, type FormState } from "../../../src/internFile";
 import { goBack, useConfirmDiscard } from "../../../src/nav";
 import { describeMentions, useNameCarry, type ProseField } from "../../../src/rename";
@@ -21,6 +21,8 @@ import { Flash, GrowingInput } from "../../../src/ui/GrowingInput";
 import { CheckIcon, TrashIcon } from "../../../src/ui/Icons";
 import { ToolIcon } from "../../../src/ui/ToolIcon";
 import { StyleDials } from "../../../src/ui/hire/PersonalityCard";
+import { LearnedFromYou, standingChange } from "../../../src/ui/LearnedFromYou";
+import { reactionInfo } from "../../../src/ui/Reactions";
 import { resolveFaceId } from "../../../src/ui/InternFace";
 import { SchedulePicker } from "../../../src/ui/SchedulePicker";
 import { ErrorNote, Loading, Screen } from "../../../src/ui/Screen";
@@ -58,6 +60,28 @@ export default function InternEditor() {
   const [renameNote, setRenameNote] = useState<string | null>(null);
   const [flashes, setFlashes] = useState<Partial<Record<ProseField, number>>>({});
   const [newItem, setNewItem] = useState("");
+  const { api } = useSettings();
+  /** what the reactions taught this intern (personality section) */
+  const [learned, setLearned] = useState<Learned | null>(null);
+  useEffect(() => {
+    if (section !== "personality" || !slug) return;
+    void api.learned(slug).then(setLearned).catch(() => setLearned(null));
+  }, [api, section, slug]);
+  const undoLearned = useCallback(
+    async (change: StyleChange) => {
+      try {
+        await api.undoStyleChange(change.intern, change.id);
+        // the dial goes back on the server; keep the form in step without marking it changed
+        const back = (f: FormState | null) => (f && f.style[change.dial] === change.to_value ? { ...f, style: { ...f.style, [change.dial]: change.from_value } } : f);
+        setForm(back);
+        setInitial(back);
+        setLearned(await api.learned(change.intern));
+      } catch (e) {
+        setSaveError(e);
+      }
+    },
+    [api],
+  );
 
   // Seed the form once, from the first manifest we get (refocus refetches must not wipe edits).
   useEffect(() => {
@@ -158,9 +182,20 @@ export default function InternEditor() {
 
           {section === "personality" ? (
             <View style={[styles.dials, { backgroundColor: colors.surfaceAlt }]}>
-              <StyleDials faceId={resolveFaceId(form.icon, slug ?? "")} style={form.style} onStyle={(style) => update({ style })} />
+              <StyleDials
+                faceId={resolveFaceId(form.icon, slug ?? "")}
+                style={form.style}
+                onStyle={(style) => update({ style })}
+                badges={Object.fromEntries(
+                  (["tone", "length"] as const).flatMap((dial) => {
+                    const change = standingChange(learned, dial, form.style);
+                    return change ? [[dial, <FromReactions key={dial} change={change} />]] : [];
+                  }),
+                )}
+              />
             </View>
           ) : null}
+          {section === "personality" && learned ? <LearnedFromYou name={name} learned={learned} style={form.style} onUndo={(c) => void undoLearned(c)} /> : null}
           {section === "personality" ? (
             <Field label={`How ${name} comes across, in words`} note="Anything the dials don't cover: manner, quirks, how they talk to you.">
               <Flash pulse={flashes.persona ?? 0} radius={radius.md}>
@@ -355,6 +390,20 @@ function MailboxesSection({ name, value, onChange }: { name: string; value: stri
   );
 }
 
+/** On a dial the reactions set: "from your reactions", with the reaction's icon. */
+function FromReactions({ change }: { change: StyleChange }) {
+  const { colors } = useAppTheme();
+  const { Icon } = reactionInfo(change.reaction);
+  return (
+    <View style={[styles.fromChip, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+      <Icon size={13} color={colors.text} />
+      <Text variant="caption" color={colors.text} style={styles.bold}>
+        from your reactions
+      </Text>
+    </View>
+  );
+}
+
 function Field({ label, note, noteColor, children }: { label: string; note?: string | null; noteColor?: string; children: React.ReactNode }) {
   return (
     <View style={styles.field}>
@@ -373,6 +422,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   bold: { fontWeight: "600" },
   dials: { borderRadius: radius.lg, padding: space.lg, gap: space.lg },
+  fromChip: { flexDirection: "row", alignItems: "center", gap: 4, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 },
   check: { width: 24, alignItems: "center" },
   body: { padding: space.lg, gap: space.xl },
   headerButton: { paddingHorizontal: space.md, height: 36, justifyContent: "center" },

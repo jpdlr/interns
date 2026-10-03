@@ -253,6 +253,11 @@ const messages = {
     { id: "m3", intern: "milo", author: "intern", ts: iso(3400e3), surface: "system", attachments: [svgAtt, csvAtt],
       text: "Here's the spend picture for the month, plus the files you asked for:\n\n```chart\n{\"type\":\"bar\",\"title\":\"Token spend by week\",\"labels\":[\"W1\",\"W2\",\"W3\",\"W4\"],\"series\":[{\"name\":\"Input\",\"data\":[41230,38800,52100,47700]},{\"name\":\"Output\",\"data\":[9000,8100,12400,10200]}],\"format\":\"number\"}\n```\n\nAnd a quick sketch:\n\n```svg\n<svg viewBox=\"0 0 240 120\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"10\" y=\"10\" width=\"100\" height=\"100\" rx=\"12\" fill=\"#2a78d6\"/><circle cx=\"180\" cy=\"60\" r=\"48\" fill=\"#eb6834\"/></svg>\n```" },
     { id: "m2", intern: "milo", author: "intern", text: "Two threads are waiting on you. I drafted replies for both — cards are in your inbox. Nothing outbound has been sent at /tmp/milo/draft.md.", ts: iso(3500e3), surface: "system" },
+    { id: "m4", intern: "milo", author: "jp", text: "Any expos worth going to this quarter?", ts: iso(1300e3), surface: "app" },
+    { id: "m5", intern: "milo", author: "intern", ts: iso(1200e3), surface: "system",
+      text: "There are three worth a look. **Vet Congress** (12–14 Nov) has the most decision-makers, but booths are pricey and the floor plan suggests poor traffic on day two. **AgriTech Expo** (28 Oct) is smaller, cheaper and two of your leads are attending. **Smart Clinics Summit** is online-only this year, which makes it cheap but hard to stand out at. If I had to pick one, I'd do AgriTech for leads and send a brochure to Vet Congress instead of a booth." },
+    { id: "m6", intern: "milo", author: "jp", text: "And the one next month?", ts: iso(1000e3), surface: "app" },
+    { id: "m7", intern: "milo", author: "intern", text: "Skip it: small, mostly suppliers, none of your leads are going.", ts: iso(900e3), surface: "system" },
   ],
   nia: [
     { id: "m3", intern: "nia", author: "intern", text: "Briefing on the city tender is ready. **Short version:** the deadline moved to the 9th.", ts: iso(7200e3), surface: "discord" },
@@ -321,6 +326,29 @@ const activity = [
 // slug. spend_today mirrors the interns[] summary fields (split input/output
 // so the app has something to add up), and stays server-computed: it is never
 // accepted on PATCH.
+const MOCK_NUDGES = {
+  too_long: { dial: "length", step: -1, opposite: "too_short", label: "too long", ask: "Should I keep it shorter?", apply: "Keep it shorter", done: "I've made myself briefer" },
+  too_short: { dial: "length", step: 1, opposite: "too_long", label: "too short", ask: "Should I give you more detail?", apply: "Give me more", done: "I'll give you more detail" },
+  too_formal: { dial: "tone", step: -1, opposite: "too_casual", label: "too formal", ask: "Should I loosen up?", apply: "Loosen up", done: "I've loosened up" },
+  too_casual: { dial: "tone", step: 1, opposite: "too_formal", label: "too casual", ask: "Should I be more polished?", apply: "Be more polished", done: "I've polished up" },
+};
+const MOCK_STOPS = { tone: ["Very casual", "Casual", "Natural", "Polished", "Formal"], length: ["One-liners", "Brief", "Balanced", "Thorough", "Detailed"] };
+/** reactions.ts state: count-from times, ask-first dials, and the moves made */
+const reactState = { since: {}, ask: {}, changes: [] };
+function mockUndoChange(change) {
+  if (change.undone_at) return;
+  const style = manifests[change.intern]?.style;
+  if (style && style[change.dial] === change.to_value) style[change.dial] = change.from_value;
+  change.undone_at = new Date().toISOString();
+  reactState.ask[`${change.intern}:${change.dial}`] = true;
+  reactState.since[`${change.intern}:${change.dial}`] = change.undone_at;
+  for (const card of cards) {
+    if (card.state !== "open" || card.context?.change_id !== change.id) continue;
+    Object.assign(card, { state: "resolved", resolved_at: change.undone_at, resolution: { via: "app", action: "undo" } });
+    emit("card_state", card);
+  }
+}
+
 const manifests = {
   milo: {
     slug: "milo", name: "Milo", role: "Personal assistant · mail + follow-ups", icon: "face-05",
@@ -501,6 +529,71 @@ const server = http.createServer((req, res) => {
       for (const list of Object.values(messages)) for (const m of list) if (m.id === pinMatch[1]) { m.pinned = pinned; emit("message", m); return json(200, m); }
       json(404, { error: "no such message" });
     });
+  }
+  // Teach by reacting (orchestrator src/reactions.ts), simplified: 4 of one
+  // kind (net) in the speaker's last 10 messages move a dial; after an undo
+  // or a hand edit the intern asks first instead.
+  let reactMatch = /^\/messages\/([^/]+)\/reaction$/.exec(path);
+  if (reactMatch && req.method === "POST") {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    return req.on("end", () => {
+      const { reaction = null } = JSON.parse(body || "{}");
+      const all = Object.values(messages).flat();
+      const m = all.find((x) => x.id === reactMatch[1]);
+      if (!m) return json(404, { error: "no such message" });
+      if (m.author !== "intern") return json(400, { error: "only an intern's messages take reactions" });
+      m.reaction = reaction;
+      m.reacted_at = reaction ? new Date().toISOString() : null;
+      emit("message", m);
+      const slug = m.speaker ?? m.intern;
+      const nudge = MOCK_NUDGES[reaction];
+      if (!nudge || !manifests[slug]) return json(200, { message: m, change: null, card: null });
+      const since = reactState.since[`${slug}:${nudge.dial}`] ?? "";
+      const latest = all.filter((x) => x.author === "intern" && (x.speaker ?? x.intern) === slug).sort((a, b) => (a.ts < b.ts ? 1 : -1)).slice(0, 10);
+      const count = latest.reduce((n, x) => (!x.reacted_at || x.reacted_at < since ? n : x.reaction === reaction ? n + 1 : x.reaction === nudge.opposite ? n - 1 : n), 0);
+      const style = (manifests[slug].style ??= { tone: 3, length: 3, initiative: 3, humour: 3 });
+      const from = style[nudge.dial];
+      const to = Math.min(5, Math.max(1, from + nudge.step));
+      if (count < 4 || to === from) return json(200, { message: m, change: null, card: null });
+      const now = new Date().toISOString();
+      const names = MOCK_STOPS[nudge.dial];
+      const title = nudge.dial[0].toUpperCase() + nudge.dial.slice(1);
+      const why = `You marked ${count} of my last 10 messages ${nudge.label}`;
+      const base = { intern: slug, severity: "info", state: "open", created_at: now, updated_at: now, resolved_at: null, snoozed_until: null, resolution: null, discord_message_id: null };
+      const context = { dial: nudge.dial, from, to, reaction, reactions: count };
+      if (reactState.ask[`${slug}:${nudge.dial}`]) {
+        const card = { ...base, id: `c-style-${Date.now()}`, title: nudge.ask, body: `${why}. Shall I move ${title} from ${names[from - 1]} to ${names[to - 1]}?`,
+          actions: [{ id: "apply", label: nudge.apply, style: "primary", kind: "button" }, { id: "not_now", label: "Not now", style: "neutral", kind: "button" }], context: { kind: "style_suggest", ...context } };
+        cards.unshift(card);
+        emit("card", card);
+        return json(200, { message: m, change: null, card });
+      }
+      style[nudge.dial] = to;
+      reactState.since[`${slug}:${nudge.dial}`] = now;
+      const change = { id: `sc-${Date.now()}`, intern: slug, dial: nudge.dial, from_value: from, to_value: to, reaction, reactions: count, asked: false, created_at: now, undone_at: null };
+      reactState.changes.unshift(change);
+      const card = { ...base, id: `c-style-${Date.now()}`, title: nudge.done, body: `${why}, so I moved ${title} from ${names[from - 1]} to ${names[to - 1]}. Undo it if that's not what you meant, and I'll ask first next time.`,
+        actions: [{ id: "keep", label: "Keep it", style: "primary", kind: "button" }, { id: "undo", label: "Undo", style: "neutral", kind: "button" }], context: { kind: "style_changed", change_id: change.id, ...context } };
+      cards.unshift(card);
+      emit("card", card);
+      json(200, { message: m, change, card });
+    });
+  }
+  let learnedMatch = /^\/interns\/([^/]+)\/learned$/.exec(path);
+  if (learnedMatch && req.method === "GET") {
+    const slug = learnedMatch[1];
+    const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+    const week = {};
+    for (const x of Object.values(messages).flat()) if (x.reaction && (x.speaker ?? x.intern) === slug && x.reacted_at >= weekAgo) week[x.reaction] = (week[x.reaction] ?? 0) + 1;
+    return json(200, { window: 10, threshold: 4, week, progress: [], asks_first: { tone: Boolean(reactState.ask[`${slug}:tone`]), length: Boolean(reactState.ask[`${slug}:length`]) }, changes: reactState.changes.filter((c) => c.intern === slug) });
+  }
+  let undoMatch = /^\/interns\/([^/]+)\/learned\/([^/]+)\/undo$/.exec(path);
+  if (undoMatch && req.method === "POST") {
+    const change = reactState.changes.find((c) => c.id === undoMatch[2] && c.intern === undoMatch[1]);
+    if (!change) return json(404, { error: "no such change" });
+    mockUndoChange(change);
+    return json(200, change);
   }
   let pinsMatch = /^\/interns\/([^/]+)\/pins$/.exec(path);
   if (pinsMatch && req.method === "GET") return json(200, (messages[pinsMatch[1]] ?? []).filter((m) => m.pinned));
@@ -773,6 +866,19 @@ const server = http.createServer((req, res) => {
       const card = cards.find((c) => c.id === id);
       if (!card) return json(404, { error: "no such card" });
       const note = (JSON.parse(body || "{}") || {}).note;
+      const ctx = card.context ?? {};
+      if (ctx.kind === "style_changed" && actionId === "undo") {
+        const change = reactState.changes.find((c) => c.id === ctx.change_id);
+        if (change) mockUndoChange(change);
+      }
+      if (ctx.kind === "style_suggest") {
+        reactState.since[`${card.intern}:${ctx.dial}`] = new Date().toISOString();
+        const style = manifests[card.intern]?.style;
+        if (actionId === "apply" && style && style[ctx.dial] === ctx.from) {
+          style[ctx.dial] = ctx.to;
+          reactState.changes.unshift({ id: `sc-${Date.now()}`, intern: card.intern, dial: ctx.dial, from_value: ctx.from, to_value: ctx.to, reaction: ctx.reaction, reactions: ctx.reactions, asked: true, created_at: new Date().toISOString(), undone_at: null });
+        }
+      }
       card.state = "resolved";
       card.resolved_at = new Date().toISOString();
       card.resolution = { via: "app", action: actionId, ...(note ? { note } : {}) };

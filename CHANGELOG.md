@@ -25,6 +25,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
   Not now / Never.
   - `graph-mail` now remembers which intern wrote each draft, and has a new read-only
     `sent-drafts` command.
+- **Teach by reacting.** Long-press an intern's message to react: Perfect, Too long, Too
+  short, Too formal, Too casual or Missed the point. The intern acknowledges it, and the
+  reaction shapes its next replies straight away. When 4 of its last 10 messages get the
+  same reaction (net of the opposite one), it moves the matching dial one stop (Length or
+  Tone) and says so on a card with Undo. Once you undo a move or set that dial yourself, it
+  asks before moving it again.
+  - The personality editor marks a dial set "from your reactions" and shows what was
+    learned this week, with Undo.
+  - `POST /messages/:id/reaction`, `GET /interns/:slug/learned`,
+    `POST /interns/:slug/learned/:id/undo`.
 - **Interview before hiring** (`POST /hire/interview`): put a question to a candidate and
   hear them answer in character. Nobody is hired; the coordinator pays for the call.
 - **Instagram research connector.** Connect your Business or Creator account in
