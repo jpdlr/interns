@@ -93,22 +93,29 @@ function verb(rule: Rule): string {
   return rule.type === "quiet_hours" ? "Held pings" : rule.type === "hold_until" ? "Held" : "Muted";
 }
 
-export function InternPages({ slug }: { slug: string }) {
-  const router = useRouter();
+/** An intern's own live pages (pinned first, then most recently changed), kept current by page events. */
+export function useInternPages(slug: string): PageHeader[] {
   const { api, configured } = useSettings();
   const [pages, setPages] = useState<PageHeader[]>([]);
   const load = useCallback(() => {
-    if (!configured) return;
-    api.listPages(slug).then((list) => setPages(list.filter((p) => p.intern === slug))).catch(() => {});
+    if (!configured || !slug) return;
+    api.listPages(slug).then((list) => setPages(list.filter((p) => p.intern === slug && !p.archived_at))).catch(() => {});
   }, [api, configured, slug]);
   useEffect(load, [load]);
   useLiveEvents((event) => {
     if (event.type === "page") load();
   });
-  if (pages.length === 0) return null;
+  return pages;
+}
+
+export function InternPages({ slug, pages }: { slug: string; pages?: PageHeader[] }) {
+  const router = useRouter();
+  const own = useInternPages(pages ? "" : slug);
+  const list = pages ?? own;
+  if (list.length === 0) return null;
   return (
     <Group title="Pages">
-      {pages.map((page) => (
+      {list.map((page) => (
         <Row
           key={page.id}
           label={page.title}

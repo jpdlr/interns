@@ -11,7 +11,7 @@ import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { InternManifestDetail, InternManifestPatch, InternWeek } from "../../../src/api";
+import type { InternManifestDetail, InternManifestPatch, InternWeek, PageKind } from "../../../src/api";
 import { FACE_IDS } from "../../../src/faces.generated";
 import { NOTIFY_INFO, notifyStatsLine, shortTokens, TOOL_INFO, useInternFile, wordCount } from "../../../src/internFile";
 import { describeCron } from "../../../src/schedule";
@@ -21,10 +21,10 @@ import { ArchiveModal } from "../../../src/ui/ArchiveModal";
 import { Button } from "../../../src/ui/Button";
 import { FacePicker } from "../../../src/ui/FacePicker";
 import { Group, Row, Switch } from "../../../src/ui/Grouped";
-import { ChatIcon, PaperclipIcon } from "../../../src/ui/Icons";
+import { BoardIcon, ChatIcon, ListIcon, PaperclipIcon, TableIcon, UsersIcon } from "../../../src/ui/Icons";
 import { InternFace, resolveFaceId } from "../../../src/ui/InternFace";
 import { EmptyState, ErrorNote, Loading, Screen } from "../../../src/ui/Screen";
-import { InternPages, StandingOrders } from "../../../src/ui/StandingOrders";
+import { InternPages, StandingOrders, useInternPages } from "../../../src/ui/StandingOrders";
 import { Text } from "../../../src/ui/Text";
 
 type Section = "about" | "personality" | "instructions" | "schedule" | "work" | "tools" | "budget" | "notify" | "mailboxes";
@@ -42,6 +42,8 @@ export default function InternProfile() {
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [archiveError, setArchiveError] = useState<unknown>(null);
   const [week, setWeek] = useState<InternWeek | null>(null);
+  const pages = useInternPages(slug ?? "");
+  const shortcuts = pages.filter((p) => p.kind !== "draft");
   /** connected mailbox labels, for the Mailboxes row */
   const [mailboxLabels, setMailboxLabels] = useState<Record<string, string> | null>(null);
   const outlookUser = Boolean(manifest && (manifest.tools.includes("mail") || manifest.tools.includes("calendar")));
@@ -187,6 +189,22 @@ export default function InternProfile() {
             <QuickAction label="Chat" icon={<ChatIcon size={18} color={colors.text} />} onPress={() => router.push(`/chat/${slug}` as never)} />
             <QuickAction label="Files" icon={<PaperclipIcon size={18} color={colors.text} />} onPress={() => router.push(`/files/${slug}` as never)} />
           </View>
+          {shortcuts.length ? (
+            // Their living pages (people, boards, tables, lists) one tap away; drafts stay in Pages below.
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.shortcutScroll} contentContainerStyle={styles.shortcuts}>
+              {shortcuts.map((page) => {
+                const Glyph = PAGE_GLYPH[page.kind] ?? ListIcon;
+                return (
+                  <QuickAction
+                    key={page.id}
+                    label={page.title}
+                    icon={<Glyph size={18} color={colors.text} />}
+                    onPress={() => router.push(`/page/${page.id}` as never)}
+                  />
+                );
+              })}
+            </ScrollView>
+          ) : null}
           <View style={styles.budget} accessibilityLabel={`Today ${shortTokens(spent)} of ${shortTokens(cap)} tokens`}>
             <View style={[styles.bar, { backgroundColor: colors.surfaceAlt }]}>
               <View style={[styles.barFill, { width: `${Math.max(used * 100, spent ? 2 : 0)}%`, backgroundColor: used >= 0.9 ? colors.urgent : used >= 0.7 ? colors.action : colors.accent }]} />
@@ -249,7 +267,7 @@ export default function InternProfile() {
         </Group>
 
         <StandingOrders slug={slug!} name={manifest.name} />
-        <InternPages slug={slug!} />
+        <InternPages slug={slug!} pages={pages} />
 
         <Group
           title="Limits"
@@ -313,12 +331,14 @@ function ThisWeek({ week }: { week: InternWeek }) {
       </View>
       {week.messages ? <Row label="Messages to you" value={String(week.messages)} /> : null}
       {week.draft_count ? <Row label="Drafts written" value={String(week.draft_count)} /> : null}
-      {week.cards_raised ? <Row label="Asked you to decide" value={`${plural(week.cards_raised, "time")}${week.cards_decided ? ` · ${week.cards_decided} decided` : ""}`} /> : null}
+      {week.cards_raised ? <Row label="Asked you to decide" value={`${week.cards_raised} new${week.cards_decided ? ` · ${week.cards_decided} decided` : ""}`} /> : null}
       {pages ? <Row label="Pages" value={pages} /> : null}
       {week.failed ? <Row label="Failed" value={plural(week.failed, "task")} /> : null}
     </Group>
   );
 }
+
+const PAGE_GLYPH: Partial<Record<PageKind, typeof ListIcon>> = { people: UsersIcon, board: BoardIcon, table: TableIcon, list: ListIcon };
 
 function QuickAction({ label, icon, onPress }: { label: string; icon: React.ReactNode; onPress: () => void }) {
   const { colors } = useAppTheme();
@@ -330,7 +350,7 @@ function QuickAction({ label, icon, onPress }: { label: string; icon: React.Reac
       style={({ pressed }) => [styles.quick, { backgroundColor: pressed ? colors.accentSoft : colors.surfaceAlt }]}
     >
       {icon}
-      <Text variant="caption" color={colors.text} style={styles.quickLabel}>
+      <Text variant="caption" color={colors.text} style={styles.quickLabel} numberOfLines={1}>
         {label}
       </Text>
     </Pressable>
@@ -342,7 +362,9 @@ const styles = StyleSheet.create({
   header: { alignItems: "center", gap: space.xs, paddingTop: space.sm },
   role: { maxWidth: 320 },
   actions: { flexDirection: "row", gap: space.sm, marginTop: space.md },
-  quick: { minWidth: 88, alignItems: "center", gap: 4, paddingVertical: space.sm, paddingHorizontal: space.lg, borderRadius: radius.lg },
+  shortcutScroll: { alignSelf: "stretch", marginHorizontal: -space.lg, marginTop: space.sm },
+  shortcuts: { flexGrow: 1, justifyContent: "center", gap: space.sm, paddingHorizontal: space.lg },
+  quick: { minWidth: 88, alignItems: "center", gap: 4, paddingVertical: space.sm, paddingHorizontal: space.lg, borderRadius: radius.lg, maxWidth: 168 },
   quickLabel: { fontWeight: "600" },
   budget: { alignSelf: "stretch", gap: 6, marginTop: space.md, paddingHorizontal: space.xl },
   pausedPill: { marginTop: space.xs, paddingHorizontal: space.md, paddingVertical: 3, borderRadius: radius.pill },
