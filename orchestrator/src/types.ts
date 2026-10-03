@@ -51,6 +51,8 @@ export const InternManifestSchema = z.object({
   guardrails: GuardrailsSchema.default({ drafts_only: true, daily_token_cap: 200_000 }),
   /** JP paused them: no schedule, backlog, mail, meetings, reviews or routing; direct messages still reach them */
   paused: z.boolean().optional(),
+  /** Outlook mailboxes this intern may use (ids from config.mailboxes); unset = all of them */
+  mailboxes: z.array(z.string()).optional(),
   /** what buzzes JP's phone (push.ts); unset = "needs_you" */
   notify: NotifyLevelSchema.optional(),
 });

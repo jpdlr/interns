@@ -463,6 +463,8 @@ def main():
     args = p.parse_args()
     if not args.mailbox:
         die("no mailbox configured — add one with tools/graph-login --mailbox <id> (see README › Outlook)", EXIT_USAGE)
+    if args.mailbox not in MAILBOXES:
+        die(f"no access to mailbox {args.mailbox!r} — this intern may use: {', '.join(sorted(MAILBOXES)) or 'none'}", EXIT_USAGE)
     _graph.ensure_msal()
     args.mailbox_dir = MAILBOXES[args.mailbox]
     token = get_token(args.mailbox_dir)

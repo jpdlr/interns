@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """graph-login — connect an Outlook mailbox to the interns (device code flow).
 
-    tools/graph-login --mailbox work [--label "Work"]
+    tools/graph-login --mailbox work [--label "Work"] [--json] [--no-config]
 
 Prints a code to enter at microsoft.com/devicelogin, then stores the MSAL
 token cache in ~/.interns/mailboxes/<id>/token.json (0600) and adds <id> to
@@ -10,6 +10,11 @@ create drafts; graph-mail never sends) and Calendars.Read (meeting briefs).
 Needs graph.client_id in config.json: the Application (client) ID of an
 Entra app registration with "Allow public client flows" on — see README.
 Restart the orchestrator afterwards so it starts polling the new mailbox.
+
+--json is for the orchestrator's Connectors flow: one JSON line per step on
+stdout ({"event": "code", ...} as soon as there is a code to show, then
+{"event": "done", ...} or {"error": ...}). --no-config leaves config.json to
+the orchestrator, which adds the mailbox itself once sign-in succeeds.
 """
 import argparse, json, os, re, sys
 
@@ -26,6 +31,8 @@ def main():
     p = argparse.ArgumentParser(prog="graph-login", description="Connect an Outlook mailbox (device code flow).")
     p.add_argument("--mailbox", required=True, help="short id for this mailbox, e.g. work or personal")
     p.add_argument("--label", default=None, help="display label (default: the id)")
+    p.add_argument("--json", action="store_true", help="machine-readable progress on stdout (one JSON object per line)")
+    p.add_argument("--no-config", action="store_true", help="do not add the mailbox to config.json")
     args = p.parse_args()
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", args.mailbox):
         die("--mailbox must be lowercase letters, digits, - or _", 2)
@@ -43,7 +50,11 @@ def main():
     flow = app.initiate_device_flow(scopes=_graph.MAIL_SCOPES + _graph.CAL_SCOPES)
     if "user_code" not in flow:
         die(f"could not start device flow: {flow.get('error_description') or flow}")
-    print(flow["message"], file=sys.stderr, flush=True)
+    if args.json:
+        print(json.dumps({"event": "code", "user_code": flow["user_code"], "verification_uri": flow["verification_uri"],
+                          "expires_in": flow.get("expires_in"), "message": flow.get("message")}), flush=True)
+    else:
+        print(flow["message"], file=sys.stderr, flush=True)
     result = app.acquire_token_by_device_flow(flow)
     if "access_token" not in result:
         die(f"sign-in failed: {result.get('error_description') or result.get('error')}")
@@ -53,23 +64,28 @@ def main():
         f.write(cache.serialize())
     os.replace(cache_path + ".tmp", cache_path)
     os.chmod(cache_path, 0o600)
+    account = (result.get("id_token_claims") or {}).get("preferred_username")
     cfg = _graph.mailbox_config(mailbox_dir)
     cfg["mailbox_label"] = args.label or cfg.get("mailbox_label") or args.mailbox
+    if account:
+        cfg["account"] = account
     with open(os.path.join(mailbox_dir, "config.json"), "w") as f:
         json.dump(cfg, f, indent=2)
 
     config_path = os.path.join(_graph.interns_home(), "config.json")
     config = _graph.settings()
-    if args.mailbox not in (config.get("mailboxes") or []):
+    if not args.no_config and args.mailbox not in (config.get("mailboxes") or []):
         config["mailboxes"] = [*(config.get("mailboxes") or []), args.mailbox]
         with open(config_path + ".tmp", "w") as f:
             json.dump(config, f, indent=2)
             f.write("\n")
         os.replace(config_path + ".tmp", config_path)
         os.chmod(config_path, 0o600)
-    account = (result.get("id_token_claims") or {}).get("preferred_username")
-    print(json.dumps({"mailbox": args.mailbox, "account": account, "token_cache": cache_path,
-                      "next": "restart the orchestrator so it polls this mailbox"}, indent=1))
+    done = {"mailbox": args.mailbox, "account": account, "token_cache": cache_path}
+    if args.json:
+        print(json.dumps({"event": "done", **done}), flush=True)
+    else:
+        print(json.dumps({**done, "next": "restart the orchestrator so it polls this mailbox"}, indent=1))
 
 
 if __name__ == "__main__":

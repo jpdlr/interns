@@ -45,6 +45,13 @@ export function pullRequestLinks(
   };
 }
 
+export interface GithubInstallation {
+  id: number;
+  account?: { login?: string; type?: string };
+  repository_selection?: string;
+  suspended_at?: string | null;
+}
+
 interface InstallationToken {
   token: string;
   expiresAt: number;
@@ -231,20 +238,46 @@ export class GithubClient {
     return result;
   }
 
-  /** App-authenticated inventory used to validate/sync account installations. */
-  async listInstallations(): Promise<{
-    id: number;
-    account?: { login?: string };
-    repository_selection?: string;
-    suspended_at?: string | null;
-  }[]> {
+  /** The App itself (name, slug, owner, link), app-authenticated. */
+  async getApp(): Promise<{ id: number; slug: string; name: string; html_url: string; owner?: { login?: string; type?: string } }> {
     if (!this.config.app_id || !this.config.private_key_path) throw new Error("GitHub App is not configured");
-    const installations: {
-      id: number;
-      account?: { login?: string };
-      repository_selection?: string;
-      suspended_at?: string | null;
-    }[] = [];
+    const response = await this.fetchFn(`${this.config.api_base_url}/app`, {
+      headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${this.appJwt()}`, "X-GitHub-Api-Version": "2022-11-28" },
+    });
+    if (!response.ok) throw new Error(`GitHub App: HTTP ${response.status} ${await response.text()}`);
+    return (await response.json()) as Awaited<ReturnType<GithubClient["getApp"]>>;
+  }
+
+  /** Finish GitHub's App manifest flow: trade the one-time code for the new App's id, slug and private key. */
+  async convertManifest(code: string): Promise<{ id: number; slug: string; name: string; html_url: string; pem: string; webhook_secret?: string | null; owner?: { login?: string; type?: string } }> {
+    const response = await this.fetchFn(`${this.config.api_base_url}/app-manifests/${encodeURIComponent(code)}/conversions`, {
+      method: "POST",
+      headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+    });
+    if (!response.ok) throw new Error(`GitHub manifest conversion: HTTP ${response.status} ${await response.text()}`);
+    return (await response.json()) as Awaited<ReturnType<GithubClient["convertManifest"]>>;
+  }
+
+  /** Whether a GitHub login is a user or an organization (public, unauthenticated). */
+  async accountType(login: string): Promise<"User" | "Organization" | null> {
+    const response = await this.fetchFn(`${this.config.api_base_url}/users/${encodeURIComponent(login)}`, {
+      headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`GitHub account lookup: HTTP ${response.status}`);
+    const user = (await response.json()) as { type?: string };
+    return user.type === "Organization" ? "Organization" : "User";
+  }
+
+  /** Forget cached installation tokens (after a disconnect or a new App). */
+  resetTokens(): void {
+    this.installationTokens.clear();
+  }
+
+  /** App-authenticated inventory used to validate/sync account installations. */
+  async listInstallations(): Promise<GithubInstallation[]> {
+    if (!this.config.app_id || !this.config.private_key_path) throw new Error("GitHub App is not configured");
+    const installations: GithubInstallation[] = [];
     for (let page = 1; ; page++) {
       const response = await this.fetchFn(`${this.config.api_base_url}/app/installations?per_page=100&page=${page}`, {
         headers: {

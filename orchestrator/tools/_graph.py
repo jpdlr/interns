@@ -30,12 +30,23 @@ def settings():
         return {}
 
 
+def allowed_mailboxes():
+    """The mailboxes this intern may use: INTERNS_MAILBOXES (set per intern by the orchestrator), or None for all."""
+    raw = os.environ.get("INTERNS_MAILBOXES")
+    if raw is None:
+        return None
+    return [m for m in (part.strip() for part in raw.split(",")) if m]
+
+
 def mailbox_dirs():
-    """{id: dir} for every configured mailbox (or every directory, if none are listed)."""
+    """{id: dir} for every configured mailbox this intern may use (or every directory, if none are listed)."""
     root = os.path.join(interns_home(), "mailboxes")
     ids = [m for m in settings().get("mailboxes") or [] if isinstance(m, str)]
     if not ids and os.path.isdir(root):
-        ids = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d)))
+        ids = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d)) and not d.startswith("_"))
+    allowed = allowed_mailboxes()
+    if allowed is not None:
+        ids = [m for m in ids if m in allowed]
     return {m: os.path.join(root, m) for m in ids}
 
 

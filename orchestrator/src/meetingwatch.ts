@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { Config } from "./config.js";
 import { calendarMailbox, internsHome } from "./config.js";
+import { mailboxesFor } from "./mailboxes.js";
 import type { Db } from "./db.js";
 import { hasExternalAttendee, isExternal, localDate } from "./agenda.js";
 import { quickRepliesFence } from "./fences.js";
@@ -354,7 +355,8 @@ export class MeetingWatcher {
   private watchingInterns(): string[] {
     return this.registry
       .list()
-      .filter(({ manifest }) => manifest.triggers.meeting_brief === true && !manifest.paused)
+      // ...and may use the calendar's mailbox (manifest.mailboxes, see mailboxes.ts)
+      .filter(({ manifest }) => manifest.triggers.meeting_brief === true && !manifest.paused && mailboxesFor(manifest, this.config).includes(calendarMailbox(this.config) ?? ""))
       .map(({ slug }) => slug);
   }
 

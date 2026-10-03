@@ -15,6 +15,7 @@ import { MailWatcher } from "./mailwatch.js";
 import { MeetingWatcher } from "./meetingwatch.js";
 import { Orchestrator } from "./orchestrator.js";
 import { PushService, wirePushNotifications } from "./push.js";
+import { ConnectorService } from "./connectors.js";
 import { localZone, setProfile } from "./profile.js";
 import { migrateSchedules } from "./schedules.js";
 import { Registry } from "./registry.js";
@@ -65,6 +66,8 @@ async function main(): Promise<void> {
   const mailwatch = new MailWatcher(db, registry, config, { home });
   const meetingwatch = new MeetingWatcher(db, registry, config, { home });
   const push = new PushService(db, config);
+  // Connectors: Outlook sign-in and the GitHub App flow from the app (connectors.ts)
+  const connectors = new ConnectorService({ db, registry, config, home, github, githubwatch, mailwatch });
   const orchestrator = new Orchestrator(db, registry, engine, config, mailwatch, discord, push);
   orchestrator.suggestHome = home;
   wireSuggestionDecisions(bus, home, capabilities);
@@ -82,6 +85,7 @@ async function main(): Promise<void> {
     github,
     orchestrator,
     home,
+    connectors,
   });
   const notifier = wirePushNotifications(bus, registry, push, db);
   // summaries at JP's summary times / when quiet hours end; daily "you never open these" check

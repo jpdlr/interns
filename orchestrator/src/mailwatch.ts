@@ -37,6 +37,7 @@ import { promisify } from "node:util";
 import type { Config } from "./config.js";
 import { internsHome } from "./config.js";
 import type { Db } from "./db.js";
+import { mailboxesFor } from "./mailboxes.js";
 import type { Registry } from "./registry.js";
 import { classifyBatch } from "./triage.js";
 import { nowIso } from "./types.js";
@@ -286,6 +287,8 @@ export class MailWatcher {
   private ticking = false;
   /** Per-mailbox consecutive-failure counts — one healthy mailbox must not reset another's. */
   private consecutiveFailures = new Map<string, number>();
+  private lastOkAt = new Map<string, string>();
+  private lastError = new Map<string, string>();
   private backingOff = false;
   private readonly home: string;
   private readonly runCli: MailCliRunner;
@@ -356,6 +359,9 @@ export class MailWatcher {
         }
         this.noteSuccess(mailbox.id);
         for (const slug of watchers) {
+          // an intern limited to some mailboxes is only woken by those
+          const manifest = this.registry.get(slug);
+          if (!manifest || !mailboxesFor(manifest, this.config).includes(mailbox.id)) continue;
           try {
             const { filtered, kept } = await this.applyToIntern(slug, mailbox.id, messages);
             tickFiltered += filtered;
@@ -533,7 +539,17 @@ export class MailWatcher {
 
   // ------------------------------------------------------- health/backoff
 
+  /** What the Connectors screen shows per mailbox: last good poll, last error, failures in a row. */
+  health(mailboxId: string): { last_ok_at: string | null; last_error: string | null; failures: number } {
+    return {
+      last_ok_at: this.lastOkAt.get(mailboxId) ?? null,
+      last_error: (this.consecutiveFailures.get(mailboxId) ?? 0) > 0 ? (this.lastError.get(mailboxId) ?? null) : null,
+      failures: this.consecutiveFailures.get(mailboxId) ?? 0,
+    };
+  }
+
   private noteFailure(mailboxId: string, err: unknown): void {
+    this.lastError.set(mailboxId, describe(err));
     const n = (this.consecutiveFailures.get(mailboxId) ?? 0) + 1;
     this.consecutiveFailures.set(mailboxId, n);
     if (n === FAILURES_BEFORE_BACKOFF) {
@@ -555,6 +571,7 @@ export class MailWatcher {
 
   private noteSuccess(mailboxId: string): void {
     this.consecutiveFailures.set(mailboxId, 0);
+    this.lastOkAt.set(mailboxId, new Date().toISOString());
     if (this.backingOff) {
       console.log(`[mailwatch] graph-mail (${mailboxId}) recovered — back to ${this.config.mail_poll_minutes}m ticks`);
       this.backingOff = false;

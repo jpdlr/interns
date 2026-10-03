@@ -35,6 +35,11 @@ export class GithubWatcher {
     void this.poll();
   }
 
+  /** Start polling once GitHub is connected (Connectors); a no-op while it already polls. poll() re-reads config each time. */
+  refresh(): void {
+    if (!this.timer) this.start();
+  }
+
   async stop(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
@@ -44,6 +49,8 @@ export class GithubWatcher {
     if (this.running) return;
     this.running = true;
     try {
+      // disconnected or no accounts enabled since start: nothing to watch
+      if (!this.github.configured || this.config.github.repositories.length === 0) return;
       const reviewer = this.config.github.reviewer_slug;
       // paused: leave PRs unrecorded so they are picked up on resume
       if (!this.registry.get(reviewer) || this.registry.get(reviewer)?.paused) return;

@@ -15,8 +15,9 @@ import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Config } from "./config.js";
+import { internsHome, type Config } from "./config.js";
 import type { Db } from "./db.js";
+import { mailboxEnv, mailboxPrompt } from "./mailboxes.js";
 import { ownerName } from "./profile.js";
 import type { Registry } from "./registry.js";
 import { standingOrdersPrompt } from "./rules.js";
@@ -226,6 +227,7 @@ export class SdkEngine implements Engine {
       `\nYour slug is \`${slug}\`.`,
       standingOrdersPrompt(this.db.listRules(slug)),
       unreachableColleagues(this.registry, slug),
+      mailboxPrompt(manifest, this.config, internsHome()),
     ].join("");
 
     const options: Options = {
@@ -245,6 +247,8 @@ export class SdkEngine implements Engine {
       maxTurns: opts.maxTurns ?? this.config.engine.max_turns,
       ...(this.config.engine.model ? { model: this.config.engine.model } : {}),
       ...(opts.abort ? { abortController: opts.abort } : {}),
+      // graph-mail / graph-cal only see the mailboxes this intern may use (mailboxes.ts)
+      ...(manifest.mailboxes ? { env: { ...process.env, ...mailboxEnv(manifest, this.config) } } : {}),
     };
 
     const prevSession = opts.freshSession ? null : this.db.getSessionId(slug);
