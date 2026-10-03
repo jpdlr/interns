@@ -12,6 +12,10 @@ not expire; this tool only reads that file.
   ig-research hashtag <tag> [--recent] [--limit N]   top (or most recent) posts for a hashtag
   ig-research quota                          hashtags searched in the last 7 days (Instagram allows 30)
 
+  --sheet (profile, hashtag) also draws the posts' images as one numbered
+  contact sheet and prints its path: open it with Read to judge an account's
+  look in one go.
+
 HARD GUARDRAIL: research only. The token may carry wider permissions the
 owner granted for later (publishing, comments, messages); this CLI never
 uses them. Do not add publish, comment, like, follow or message commands —
@@ -21,7 +25,7 @@ approval card.
 Every command prints JSON; failures print {"error": "..."} and exit 1.
 IG_GRAPH_BASE overrides the API base (tests point it at a local fake).
 """
-import argparse, json, os, re, sys, urllib.error, urllib.parse, urllib.request
+import argparse, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
 
 GRAPH = os.environ.get("IG_GRAPH_BASE", "https://graph.facebook.com/v25.0").rstrip("/")
 HASHTAG_WEEKLY_LIMIT = 30
@@ -29,8 +33,9 @@ CAPTION_MAX = 1000
 USERNAME = re.compile(r"^[A-Za-z0-9._]{1,30}$")
 
 PROFILE_FIELDS = "username,name,biography,website,followers_count,follows_count,media_count,profile_picture_url"
-MEDIA_FIELDS = "id,caption,media_type,media_product_type,like_count,comments_count,timestamp,permalink"
-HASHTAG_MEDIA_FIELDS = "id,caption,media_type,like_count,comments_count,timestamp,permalink"
+MEDIA_FIELDS = "id,caption,media_type,media_product_type,like_count,comments_count,timestamp,permalink,media_url,thumbnail_url"
+HASHTAG_MEDIA_FIELDS = "id,caption,media_type,like_count,comments_count,timestamp,permalink,media_url"
+SHEET_MAX = 12
 
 
 def die(msg, code=1):
@@ -113,6 +118,43 @@ def engagement(posts, followers):
             "likes_hidden_on": len(posts) - len(liked)}
 
 
+def sheet(posts, name):
+    """Download the posts' images (a video's cover) and draw one contact sheet.
+    Image URLs are dropped from the posts either way: they're long and expire."""
+    urls = []
+    for post in posts:
+        url = post.pop("media_url", None)
+        cover = post.pop("thumbnail_url", None)
+        urls.append(cover or url)
+    if name is None:
+        return None
+    sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+    try:
+        from _sheet import contact_sheet
+    except ImportError:
+        return {"error": "Pillow isn't installed (pip install -r orchestrator/tools/requirements.txt)"}
+    home = os.environ.get("INTERNS_HOME") or os.path.join(os.path.expanduser("~"), ".interns")
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    folder = os.path.join(home, "instagram", "sheets", f"{re.sub(r'[^A-Za-z0-9._-]', '_', name)}-{stamp}")
+    os.makedirs(folder, exist_ok=True)
+    files = []
+    for n, url in enumerate(urls[:SHEET_MAX]):
+        if not url:
+            continue
+        path = os.path.join(folder, f"{n + 1}.jpg")
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "interns-ig-research"}), timeout=20) as res, open(path, "wb") as f:
+                f.write(res.read())
+            files.append(path)
+        except (urllib.error.URLError, OSError, ValueError):
+            continue
+    out = os.path.join(folder, "sheet.jpg")
+    placed = contact_sheet(files, out, labels=[os.path.basename(f)[:-4] for f in files])
+    if not placed:
+        return {"error": "none of the post images could be downloaded"}
+    return {"path": out, "images": len(placed), "numbers": "match the post order in recent_posts / posts (1 = first)"}
+
+
 def cmd_whoami(cfg, token, _args):
     me = get(cfg["ig_user_id"], token, fields="username,name,followers_count,media_count")
     return {"username": me.get("username"), "name": me.get("name"), "followers_count": me.get("followers_count"),
@@ -127,8 +169,9 @@ def cmd_profile(cfg, token, args):
     fields = f"business_discovery.username({username}){{{PROFILE_FIELDS},media.limit({n}){{{MEDIA_FIELDS}}}}}"
     bd = get(cfg["ig_user_id"], token, {"username": username}, fields=fields).get("business_discovery") or {}
     posts = [trim(p) for p in (bd.pop("media", None) or {}).get("data", [])]
+    drawn = sheet(posts, username if args.sheet else None)
     return {**bd, "url": f"https://www.instagram.com/{bd.get('username', username)}/", "recent_posts": posts,
-            "engagement": engagement(posts, bd.get("followers_count"))}
+            "engagement": engagement(posts, bd.get("followers_count")), **({"sheet": drawn} if drawn else {})}
 
 
 def normalize_tag(raw):
@@ -147,8 +190,10 @@ def cmd_hashtag(cfg, token, args):
     edge = "recent_media" if args.recent else "top_media"
     n = max(1, min(args.limit, 50))
     posts = get(f"{found[0]['id']}/{edge}", token, user_id=ig, fields=HASHTAG_MEDIA_FIELDS, limit=n).get("data") or []
+    posts = [trim(p) for p in posts[:n]]
+    drawn = sheet(posts, f"tag-{tag}" if args.sheet else None)
     return {"hashtag": tag, "sort": "recent" if args.recent else "top", "url": f"https://www.instagram.com/explore/tags/{tag}/",
-            "posts": [trim(p) for p in posts[:n]],
+            "posts": posts, **({"sheet": drawn} if drawn else {}),
             "note": "Instagram doesn't say who posted hashtag results; open a post's permalink to see the account."}
 
 
@@ -166,10 +211,12 @@ def main():
     p = sub.add_parser("profile", help="a public Business or Creator account: bio, followers, recent posts")
     p.add_argument("username")
     p.add_argument("--posts", type=int, default=12, help="recent posts to include (1-50, default 12)")
+    p.add_argument("--sheet", action="store_true", help="also draw the first 12 posts as a contact sheet")
     h = sub.add_parser("hashtag", help="top or recent posts for a hashtag (30 unique hashtags per 7 days)")
     h.add_argument("tag")
     h.add_argument("--recent", action="store_true", help="newest posts (last 24 hours) instead of top posts")
     h.add_argument("--limit", type=int, default=15, help="posts to return (1-50, default 15)")
+    h.add_argument("--sheet", action="store_true", help="also draw the first 12 posts as a contact sheet")
     sub.add_parser("quota", help="hashtags searched in the last 7 days")
     args = ap.parse_args()
     cfg, token = load_config()

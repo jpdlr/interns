@@ -1,7 +1,8 @@
 /**
  * Connectors: one card per tool the crew can use, with where it stands and
- * one tap to connect or manage it. Outlook, GitHub and Instagram run their
- * whole setup from here (connectors/outlook, /github, /instagram); anything else is a
+ * one tap to connect or manage it. Outlook, GitHub, Instagram and Google Photos
+ * run their whole setup from here (connectors/outlook, /github, /instagram,
+ * /google-photos); anything else is a
  * conversation with the coordinator, whose builder can make a connector.
  */
 import { useFocusEffect, useRouter } from "expo-router";
@@ -12,7 +13,7 @@ import type { ConnectorsOverview } from "../../src/api";
 import { useCoordinatorName } from "../../src/owner";
 import { useSettings } from "../../src/settings";
 import { space } from "../../src/theme";
-import { ConnectorCard, githubSummary, instagramSummary, outlookSummary } from "../../src/ui/ConnectorCard";
+import { ConnectorCard, githubSummary, googlePhotosSummary, instagramSummary, outlookSummary } from "../../src/ui/ConnectorCard";
 import { BrandLogo } from "../../src/ui/BrandLogo";
 import { BulbIcon } from "../../src/ui/Icons";
 import { EmptyState, ErrorNote, Loading, Screen } from "../../src/ui/Screen";
@@ -44,6 +45,7 @@ export default function ConnectorsScreen() {
   const outlook = outlookSummary(overview.outlook);
   const github = githubSummary(overview.github);
   const instagram = instagramSummary(overview.instagram);
+  const googlePhotos = googlePhotosSummary(overview.google_photos);
   return (
     <Screen>
       <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + space.xxl }]}>
@@ -71,6 +73,14 @@ export default function ConnectorsScreen() {
           status={instagram}
           action={overview.instagram.connected ? "Manage" : "Connect"}
           onPress={() => router.push("/connectors/instagram" as never)}
+        />
+        <ConnectorCard
+          icon={<BrandLogo brand="google-photos" size={28} />}
+          title="Google Photos"
+          description="Share albums or photos with the crew. They're copied to your server so interns can browse, tag and pick from them."
+          status={googlePhotos}
+          action={overview.google_photos?.connected ? "Manage" : "Connect"}
+          onPress={() => router.push("/connectors/google-photos" as never)}
         />
         <ConnectorCard
           icon={<BulbIcon size={24} />}

@@ -33,6 +33,10 @@ const owner = {
 
 /** Connectors state: MOCK_FRESH starts with nothing connected; MOCK_GITHUB=1 / MOCK_INSTAGRAM=1 start those connected. */
 const connectorState = {
+  /** MOCK_PHOTOS=1 starts with Google Photos set up and a few photos shared */
+  googlePhotos: process.env.MOCK_PHOTOS
+    ? { client_id: "123456-demo.apps.googleusercontent.com", connected: true, count: 48, last_import: new Date(Date.now() - 86_400_000).toISOString(), enabled: { milo: true }, session: null }
+    : { client_id: null, connected: false, count: 0, last_import: null, enabled: {}, session: null },
   client_id: process.env.MOCK_FRESH ? null : "11111111-2222-3333-4444-555555555555",
   authority: "organizations",
   calendar: "work",
@@ -66,10 +70,69 @@ function outlookView() {
   };
 }
 
+function photosView() {
+  const gp = connectorState.googlePhotos;
+  return {
+    app: { configured: Boolean(gp.client_id), client_id: gp.client_id },
+    connected: gp.connected,
+    needs_reconnect: false,
+    connected_at: gp.connected ? new Date().toISOString() : null,
+    library: { count: gp.count, photos: gp.count, last_import: gp.last_import },
+    interns: interns.filter((i) => i.slug !== "coordinator").map((i) => ({ slug: i.slug, name: i.name, enabled: Boolean(gp.enabled[i.slug]) })),
+    sessions: gp.session && ["waiting", "importing"].includes(gp.session.state) ? [gp.session] : [],
+  };
+}
+
 function connectorRoute(req, path, json) {
   const c = connectorState;
   const body = () => new Promise((resolve) => { let raw = ""; req.on("data", (d) => (raw += d)); req.on("end", () => resolve(JSON.parse(raw || "{}"))); });
-  if (path === "/connectors" && req.method === "GET") return json(200, { outlook: outlookView(), github: c.github, instagram: c.instagram });
+  if (path === "/connectors" && req.method === "GET") return json(200, { outlook: outlookView(), github: c.github, instagram: c.instagram, google_photos: photosView() });
+  // Google Photos (orchestrator src/photos.ts), simplified: sign-in comes straight back,
+  // a pick waits two polls, then "imports" a few photos.
+  const gp = c.googlePhotos;
+  if (path === "/connectors/google-photos" && req.method === "GET") return json(200, photosView());
+  if (path === "/connectors/google-photos/app" && req.method === "PUT") {
+    return void body().then((b) => {
+      if (!/^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$/.test(b.client_id ?? "")) return json(400, { error: "That doesn't look like a Google OAuth client ID (it ends in .apps.googleusercontent.com)." });
+      gp.client_id = b.client_id;
+      json(200, photosView());
+    });
+  }
+  if (path === "/connectors/google-photos/connect" && req.method === "POST") {
+    return void body().then((b) => {
+      gp.connected = true;
+      json(200, { url: `${b.origin}/connectors/google-photos?connected=1` });
+    });
+  }
+  if (path === "/connectors/google-photos/sessions" && req.method === "POST") {
+    gp.session = { id: `s${Date.now()}`, picker_uri: "https://photos.google.com/picker/demo", state: "waiting", total: 0, imported: 0, skipped: 0, error: null, started_at: new Date().toISOString(), polls: 0 };
+    return json(200, gp.session);
+  }
+  const gpSession = /^\/connectors\/google-photos\/sessions\/([^/]+)$/.exec(path);
+  if (gpSession && gp.session?.id === gpSession[1]) {
+    if (req.method === "DELETE") return (gp.session.state = "expired"), json(200, { ok: true });
+    const s = gp.session;
+    s.polls++;
+    if (s.state === "waiting" && s.polls > 2) Object.assign(s, { state: "importing", total: 24, imported: 9 });
+    else if (s.state === "importing") {
+      Object.assign(s, { state: "done", imported: 24 });
+      gp.count += 24;
+      gp.last_import = new Date().toISOString();
+    }
+    const { polls: _p, ...view } = s;
+    return json(200, view);
+  }
+  if (path === "/connectors/google-photos" && req.method === "PATCH") {
+    return void body().then((b) => {
+      for (const [slug, on] of Object.entries(b.interns ?? {})) gp.enabled[slug] = on;
+      json(200, photosView());
+    });
+  }
+  if (path === "/connectors/google-photos" && req.method === "DELETE") {
+    gp.connected = false;
+    if (/library=1/.test(req.url)) gp.count = 0;
+    return json(200, photosView());
+  }
   if (path === "/connectors/instagram" && req.method === "GET") return json(200, c.instagram);
   if (path === "/connectors/instagram" && req.method === "PUT") {
     return void body().then((b) => {

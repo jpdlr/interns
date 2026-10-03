@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { internsHome, type Config } from "./config.js";
 import type { Db } from "./db.js";
 import { instagramPrompt } from "./instagram.js";
+import { photosPrompt } from "./photos.js";
 import { mailboxEnv, mailboxPrompt } from "./mailboxes.js";
 import { ownerName } from "./profile.js";
 import type { Registry } from "./registry.js";
@@ -71,6 +72,9 @@ export const TOOL_CATALOG: Record<string, string[]> = {
   // Instagram research via the read-only ig-research CLI (public Business/Creator
   // profiles and hashtags; no publish, comment or message command exists).
   instagram: [tool("ig-research")],
+  // Photos the owner shared from Google Photos, via the photo-library CLI
+  // (contact sheets, tags); it only reads the local copies.
+  photos: [tool("photo-library")],
 };
 
 /**
@@ -272,6 +276,7 @@ export class SdkEngine implements Engine {
       unreachableColleagues(this.registry, slug),
       mailboxPrompt(manifest, this.config, internsHome()),
       instagramPrompt(manifest, internsHome()),
+      photosPrompt(manifest, internsHome()),
     ].join("");
 
     const options: Options = {

@@ -90,6 +90,8 @@ export interface ConnectorDeps {
   checkMailbox?: (id: string) => Promise<{ ok: boolean; unread?: number; error?: string }>;
   /** tests inject a fake Facebook; default is fetch */
   graphFetch?: GraphFetch;
+  /** Google Photos (photos.ts), for the overview */
+  photos?: { status(): unknown };
 }
 
 const MAILBOX_ID = /^[a-z0-9][a-z0-9_-]*$/;
@@ -175,7 +177,7 @@ export class ConnectorService {
   // --------------------------------------------------------- overview
 
   async overview() {
-    return { outlook: this.outlook(), github: await this.githubStatus(), instagram: this.instagramStatus() };
+    return { outlook: this.outlook(), github: await this.githubStatus(), instagram: this.instagramStatus(), google_photos: this.deps.photos?.status() ?? null };
   }
 
   // ----------------------------------------------------------- Outlook

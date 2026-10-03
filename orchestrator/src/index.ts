@@ -16,6 +16,7 @@ import { MeetingWatcher } from "./meetingwatch.js";
 import { Orchestrator } from "./orchestrator.js";
 import { PushService, wirePushNotifications } from "./push.js";
 import { ConnectorService } from "./connectors.js";
+import { GooglePhotos } from "./photos.js";
 import { DraftLearner } from "./draftlearn.js";
 import { localZone, setProfile } from "./profile.js";
 import { migrateSchedules } from "./schedules.js";
@@ -68,7 +69,9 @@ async function main(): Promise<void> {
   const meetingwatch = new MeetingWatcher(db, registry, config, { home });
   const push = new PushService(db, config);
   // Connectors: Outlook sign-in and the GitHub App flow from the app (connectors.ts)
-  const connectors = new ConnectorService({ db, registry, config, home, github, githubwatch, mailwatch });
+  // Google Photos: photos the owner picks, copied into a library interns can browse (photos.ts)
+  const photos = new GooglePhotos(home, registry);
+  const connectors = new ConnectorService({ db, registry, config, home, github, githubwatch, mailwatch, photos });
   const orchestrator = new Orchestrator(db, registry, engine, config, mailwatch, discord, push);
   orchestrator.suggestHome = home;
   wireSuggestionDecisions(bus, home, capabilities);
@@ -87,6 +90,7 @@ async function main(): Promise<void> {
     orchestrator,
     home,
     connectors,
+    photos,
   });
   const notifier = wirePushNotifications(bus, registry, push, db);
   // learn from the owner's draft edits: sent drafts are compared every half hour (draftlearn.ts)
