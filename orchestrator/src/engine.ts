@@ -141,8 +141,15 @@ When ${owner} wants to see a set of things (people, a pipeline, a shortlist, a p
 A new page's preview is attached to your reply automatically. When you change a page, say what changed in one short line ("Moved Ada to Signed") — do not paste the page again. Keep the summary line current. Messages ${owner} sends from a page look like "Ada Okafor — draft a follow-up ⟨pg_…·p_3⟩": the marker at the end names the page and item to act on (${owner} sees it as a small link, so never repeat the ids back).
 For email drafts: after graph-mail draft/revise-draft, pass its JSON to \`intern-page create --kind draft --data-file\` (first time) or \`intern-page update <page_id> --data-file\` (revisions), so ${owner} reviews the draft in the app. Revise the SAME draft (graph-mail revise-draft) when ${owner} asks for changes; never leave superseded drafts behind.
 
+## ${owner}'s latest word wins
+- ${owner}'s most recent message overrides your earlier proposals, your notes and memory files, and these instructions where they conflict. When ${owner} picks, edits or writes a version, use it exactly as given.
+- When ${owner} rejects, removes or replaces something ("I don't like X", "no, not X", "don't add X"), drop it everywhere, not just where it came up, save it at once as a guidance standing order ("Don't use X"), and fix your notes so they can't bring it back. Never reintroduce it or argue for it again.
+- Do what was asked, then stop. Don't critique ${owner}'s own drafts unless asked; flag only real problems (a typo, over a limit) in one line. Once ${owner} has chosen, give the final version, not more options.
+- Match your length to the message: a one-line instruction gets the result and at most one line more. No recaps of what you learned, no headings on a short reply.
+- Ask a question only when you can't go on without the answer. Never repeat a question or count how often you've asked.
+
 ## Standing orders
-When ${owner} tells you something lasting ("from now on…", "always…", "never…", "ignore X", "don't send me Y"), save it — otherwise it is forgotten:
+When ${owner} tells you something lasting ("from now on…", "always…", "never…", "ignore X", "don't send me Y") or turns something down ("I don't like X", "don't add X"), save it — otherwise it is forgotten:
   ${TOOLS_DIR}/intern-rule add --intern <your-slug> --type <type> --text "<one line, in ${owner}'s terms>" [params]
   types: mute_repo --repo owner/name   ·   mute_sender --address a@b.c | --domain b.c   ·   quiet_hours --from 21:00 --to 07:00   ·   hold_until --match "maya@brightline.example" --until 2026-10-01   ·   guidance (anything else, kept in your instructions)
 The hard types filter INCOMING work before it reaches you: mute_repo drops PR reviews, mute_sender drops mail from a sender, hold_until parks incoming mail/PRs whose sender or subject contains --match (use an address or name that really appears there) and hands them back on the date, quiet_hours holds ${owner}'s phone notifications. Use a hard type whenever the instruction is about what ${owner} wants kept away from them.
@@ -159,7 +166,7 @@ For a simple choice, offer quick-reply chips instead (${owner} taps one and it c
   \`\`\`
 
 ## Sign-off
-End each reply to ${owner} with one short sign-off line in your own voice, starting with an em dash: "— Rhea, still reading the diff" / "— Milo, drafts in your inbox". Vary it; never more than one line; skip it when your reply is a single sentence or "(nothing)".
+On longer updates you start yourself (a report, a briefing), you may end with one short sign-off line in your own voice, starting with an em dash: "— Rhea, still reading the diff". Never on a reply to a quick instruction, in a back-and-forth, or when your reply is short or "(nothing)".
 `;
 }
 
@@ -192,6 +199,33 @@ function unreachableColleagues(registry: Registry, slug: string): string {
     .map((c) => `${c.manifest.name}${c.manifest.paused ? " (paused)" : ""}`);
   if (names.length === 0) return "";
   return `\n## Colleagues you can't @mention right now\n${names.join(", ")}: an @mention won't reach them. If you need one of them, say so to ${ownerName()} instead.`;
+}
+
+/** A session whose last call carried more context than this is closed; the next run starts fresh. */
+export const SESSION_ROTATE_TOKENS = 120_000;
+
+/**
+ * The end of an intern's 1:1 chat, for the first run of a fresh session, so
+ * closing a long session doesn't lose the thread. Leaves out the owner's
+ * message the run is answering (it is the input).
+ */
+export function carryOverPrompt(db: Db, slug: string, name: string, input: string, limit = 12): string {
+  const owner = ownerName();
+  const messages = db.listMessages(slug, limit + 1);
+  const last = messages.at(-1);
+  if (last && last.author === "jp" && input.includes(last.text.trim())) messages.pop();
+  const lines = messages.slice(-limit).map((m) => {
+    const who = m.author === "jp" ? owner : m.author === "coordinator" ? "Coordinator" : (m.speaker ?? m.intern) === slug ? `You (${name})` : (m.speaker ?? m.intern);
+    const text = m.text.replace(/```[\s\S]*?```/g, (block) => (block.length > 700 ? "[block]" : block)).replace(/\s+/g, " ").trim();
+    return `[${who}]: ${text.slice(0, 700)}${text.length > 700 ? "…" : ""}`;
+  });
+  return [
+    `## Where you left off`,
+    `Your previous session had grown long, so this is a fresh one. Your instructions, standing orders and notes still apply. The end of your chat with ${owner}, for continuity:`,
+    ...(lines.length ? lines : ["(no earlier messages)"]),
+    ``,
+    `## Now`,
+  ].join("\n");
 }
 
 export class CapExceededError extends Error {
@@ -263,8 +297,16 @@ export class SdkEngine implements Engine {
       env: { ...process.env, INTERNS_INTERN: slug, ...mailboxEnv(manifest, this.config) },
     };
 
-    const prevSession = opts.freshSession ? null : this.db.getSessionId(slug);
+    // A session that has grown long is closed: every turn re-reads all of it
+    // (slow, costly, and the intern's own old replies drown out the owner's
+    // latest word). The next run starts fresh with the end of the chat.
+    const stored = opts.freshSession ? null : this.db.getSessionId(slug);
+    const rotating = Boolean(stored) && Number(this.db.getKv(`session_ctx:${slug}`) ?? 0) > SESSION_ROTATE_TOKENS;
+    const prevSession = rotating ? null : stored;
     if (prevSession) options.resume = prevSession;
+    if (rotating) input = `${carryOverPrompt(this.db, slug, manifest.name, input)}\n${input}`;
+    /** the largest context a main-loop call of this run carried */
+    let contextTokens = 0;
 
     let text = "";
     let sessionId: string | null = null;
@@ -275,6 +317,10 @@ export class SdkEngine implements Engine {
 
     try {
       for await (const message of query({ prompt: input, options })) {
+        if (message.type === "assistant" && !message.parent_tool_use_id) {
+          const u = message.message.usage;
+          contextTokens = Math.max(contextTokens, (u?.input_tokens ?? 0) + (u?.cache_read_input_tokens ?? 0) + (u?.cache_creation_input_tokens ?? 0));
+        }
         if (message.type === "result") {
           sessionId = message.session_id ?? null;
           // modelUsage covers main loop + subagents; docs prefer it over .usage
@@ -302,7 +348,10 @@ export class SdkEngine implements Engine {
     if (inputTokens || outputTokens || costUsd) {
       this.db.recordSpend(slug, inputTokens, outputTokens, costUsd);
     }
-    if (sessionId) this.db.setSessionId(slug, sessionId);
+    if (sessionId) {
+      this.db.setSessionId(slug, sessionId);
+      this.db.setKv(`session_ctx:${slug}`, String(contextTokens));
+    }
 
     return { ok: !error, text, sessionId, inputTokens, outputTokens, costUsd, error };
   }

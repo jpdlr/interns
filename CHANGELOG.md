@@ -49,6 +49,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
   has no post, comment or message command.
 
 ### Fixed
+- **Interns stop repeating what you turned down.** Every intern is told your latest message
+  wins: use your version as given, drop a rejected idea everywhere and save it as a standing
+  order ("I don't like X" now counts, not only "from now on"), don't critique your drafts
+  unasked, and match the reply's length to your message. The sign-off line is only for longer
+  updates they start themselves.
+- **Long sessions are closed.** Once an intern's session carries more than 120K tokens of
+  context, the next run starts fresh with the end of the chat. Before, every turn re-read the
+  whole history, which was slow and costly and let old replies drown out new instructions.
 - **New messages show up without leaving the chat.** A live stream that died quietly (a phone
   that slept, a dropped connection) kept saying "live" and delivered nothing. The app now
   replaces a stream that has been silent for a minute, catches up after every reconnect, and
