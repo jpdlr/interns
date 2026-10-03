@@ -49,6 +49,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
   has no post, comment or message command.
 
 ### Fixed
+- **No dark flash in light mode.** The app's first frame (the loading screen, before the
+  JavaScript runs) was always dark. It now paints from CSS variables that follow your phone or
+  your Light/Dark setting, applied before the first paint.
+- **Updates mostly install themselves.** An update that arrives while you're away goes in when
+  you come back to the app. Mid-session, a small card below the status bar offers Refresh, or
+  can be dismissed, instead of a tiny pill under the Dynamic Island.
 - **Interns stop repeating what you turned down.** Every intern is told your latest message
   wins: use your version as given, drop a rejected idea everywhere and save it as a standing
   order ("I don't like X" now counts, not only "from now on"), don't critique your drafts

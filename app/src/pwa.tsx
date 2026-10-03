@@ -13,27 +13,61 @@
  *     one on the server. This works over plain http today, costs one small
  *     no-store request on focus, and is what actually delivers updates now.
  *
- * Either way: if the app only just opened we reload silently, and if JP is
- * mid-session we offer a pill rather than yanking the screen out from under
- * him.
+ * Either way: if the app only just opened, or the owner is coming back to it
+ * after a while away, we reload silently (composer drafts are saved). Only
+ * mid-session do we offer a small card instead of yanking the screen away.
  */
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Platform, Pressable, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { radius, space, useAppTheme } from "./theme";
+import { RefreshIcon, XIcon } from "./ui/Icons";
 import { Text } from "./ui/Text";
 
 /** Below this, the app was "just opened" and can refresh without asking. */
 const SILENT_RELOAD_WINDOW_MS = 3_000;
 /** Background re-check cadence while the app stays open. */
 const BUILD_POLL_MS = 60_000;
+/** Away at least this long, coming back counts as "just opened". */
+const AWAY_MS = 30_000;
 
-export function useAppUpdate(): { updateReady: boolean; apply: () => void } {
+export function useAppUpdate(): { updateReady: boolean; apply: () => void; dismiss: () => void } {
   const [updateReady, setUpdateReady] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  /** until when an update may reload without asking (just opened, or just back) */
+  const quietUntil = useRef(Date.now() + SILENT_RELOAD_WINDOW_MS);
+  const ready = useRef(false);
+  const offer = useCallback(() => {
+    if (Date.now() < quietUntil.current) location.reload();
+    else {
+      ready.current = true;
+      setUpdateReady(true);
+    }
+  }, []);
+
+  // ------------------------------------------- coming back after a while away
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof document === "undefined") return;
+    let hiddenAt: number | null = null;
+    const onVisibility = () => {
+      if (document.hidden) {
+        hiddenAt = Date.now();
+        return;
+      }
+      if (hiddenAt !== null && Date.now() - hiddenAt >= AWAY_MS) {
+        // An update that waited while the owner was away goes in now.
+        if (ready.current) return location.reload();
+        quietUntil.current = Date.now() + SILENT_RELOAD_WINDOW_MS;
+      }
+      hiddenAt = null;
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
 
   // ------------------------------------------------ build stamp (works on http)
   useEffect(() => {
     if (Platform.OS !== "web" || typeof fetch === "undefined") return;
-    const loadedAt = Date.now();
     let booted: string | null = null;
     let disposed = false;
 
@@ -55,10 +89,7 @@ export function useAppUpdate(): { updateReady: boolean; apply: () => void } {
         booted = build;
         return;
       }
-      if (build !== booted) {
-        if (Date.now() - loadedAt < SILENT_RELOAD_WINDOW_MS) location.reload();
-        else setUpdateReady(true);
-      }
+      if (build !== booted) offer();
     };
 
     void check();
@@ -74,14 +105,13 @@ export function useAppUpdate(): { updateReady: boolean; apply: () => void } {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, []);
+  }, [offer]);
 
   // ------------------------------------------------------------ service worker
   useEffect(() => {
     if (Platform.OS !== "web") return;
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
 
-    const loadedAt = Date.now();
     // A first install is not an update — there was nothing to replace.
     const hadController = Boolean(navigator.serviceWorker.controller);
     let disposed = false;
@@ -112,11 +142,7 @@ export function useAppUpdate(): { updateReady: boolean; apply: () => void } {
           installing.addEventListener("statechange", () => {
             if (installing.state !== "installed") return;
             if (!hadController && !navigator.serviceWorker.controller) return; // first install
-            if (Date.now() - loadedAt < SILENT_RELOAD_WINDOW_MS) {
-              location.reload();
-            } else {
-              setUpdateReady(true);
-            }
+            offer();
           });
         });
       })
@@ -129,49 +155,69 @@ export function useAppUpdate(): { updateReady: boolean; apply: () => void } {
       disposed = true;
       for (const cleanup of cleanups) cleanup();
     };
-  }, []);
+  }, [offer]);
 
   const apply = useCallback(() => {
     if (Platform.OS === "web") location.reload();
   }, []);
+  const dismiss = useCallback(() => setDismissed(true), []);
 
-  return { updateReady, apply };
+  return { updateReady: updateReady && !dismissed, apply, dismiss };
 }
 
 
-/** The mid-session offer. Deliberately small and ignorable. */
-export function UpdatePill({ visible, onPress }: { visible: boolean; onPress: () => void }) {
+/** The mid-session offer: a small card under the status bar, easy to ignore or dismiss. */
+export function UpdatePill({ visible, onPress, onDismiss }: { visible: boolean; onPress: () => void; onDismiss?: () => void }) {
   const { colors } = useAppTheme();
+  const insets = useSafeAreaInsets();
   if (!visible) return null;
   return (
-    <View style={styles.wrap} pointerEvents="box-none">
-      <Pressable
-        accessibilityRole="button"
-        onPress={onPress}
-        style={({ pressed }) => [styles.pill, { backgroundColor: colors.surface, borderColor: colors.border }, pressed && styles.pressed]}
-      >
-        <Text variant="caption" color={colors.accent}>
-          Update ready — tap to refresh
+    <View style={[styles.wrap, { top: insets.top + space.sm }]} pointerEvents="box-none">
+      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]} accessibilityRole="alert">
+        <View style={[styles.icon, { backgroundColor: colors.surfaceAlt }]}>
+          <RefreshIcon size={18} color={colors.text} />
+        </View>
+        <Text variant="subtle" color={colors.text} style={styles.text} numberOfLines={1}>
+          A new version is ready
         </Text>
-      </Pressable>
+        <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.button, { backgroundColor: colors.accent }, pressed && styles.pressed]}>
+          <Text variant="subtle" color={colors.onAccent} style={styles.bold}>
+            Refresh
+          </Text>
+        </Pressable>
+        {onDismiss ? (
+          <Pressable accessibilityRole="button" accessibilityLabel="Not now" onPress={onDismiss} hitSlop={8} style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
+            <XIcon size={16} color={colors.textDim} />
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    position: "absolute",
-    top: space.sm,
-    left: 0,
-    right: 0,
+  wrap: { position: "absolute", left: 0, right: 0, alignItems: "center", paddingHorizontal: space.lg, zIndex: 50 },
+  card: {
+    flexDirection: "row",
     alignItems: "center",
-    zIndex: 50,
-  },
-  pill: {
-    paddingHorizontal: space.lg,
-    paddingVertical: space.sm,
-    borderRadius: radius.pill,
+    gap: space.md,
+    width: "100%",
+    maxWidth: 440,
     borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.xl,
+    paddingLeft: space.sm,
+    paddingRight: space.md,
+    paddingVertical: space.sm,
+    shadowColor: "#000",
+    shadowOpacity: 0.14,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
   },
+  icon: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
+  text: { flex: 1 },
+  bold: { fontWeight: "600" },
+  button: { borderRadius: radius.pill, paddingHorizontal: space.lg, paddingVertical: 7 },
+  close: { width: 24, height: 24, alignItems: "center", justifyContent: "center" },
   pressed: { opacity: 0.75 },
 });
