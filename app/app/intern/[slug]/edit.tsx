@@ -10,9 +10,11 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { nameConflict, useCrew } from "../../../src/crew";
+import type { MailboxStatus } from "../../../src/api";
 import { changedPatch, FALLBACK_TOOLS, formFromManifest, NOTIFY_INFO, NOTIFY_LEVELS, notifyStatsLine, shortTokens, TOOL_INFO, useInternFile, wordCount, type FormState } from "../../../src/internFile";
 import { goBack, useConfirmDiscard } from "../../../src/nav";
 import { describeMentions, useNameCarry, type ProseField } from "../../../src/rename";
+import { useSettings } from "../../../src/settings";
 import { radius, scaledFont, space, useAppTheme } from "../../../src/theme";
 import { Group, Row, Switch } from "../../../src/ui/Grouped";
 import { Flash, GrowingInput } from "../../../src/ui/GrowingInput";
@@ -21,7 +23,7 @@ import { SchedulePicker } from "../../../src/ui/SchedulePicker";
 import { ErrorNote, Loading, Screen } from "../../../src/ui/Screen";
 import { Text } from "../../../src/ui/Text";
 
-type Section = "about" | "personality" | "instructions" | "schedule" | "work" | "tools" | "budget" | "notify";
+type Section = "about" | "personality" | "instructions" | "schedule" | "work" | "tools" | "budget" | "notify" | "mailboxes";
 
 const TITLES: Record<Section, string> = {
   about: "Name and role",
@@ -32,6 +34,7 @@ const TITLES: Record<Section, string> = {
   tools: "Tools",
   budget: "Daily budget",
   notify: "Notifications",
+  mailboxes: "Mailboxes",
 };
 
 const BUDGETS = [50_000, 100_000, 200_000, 500_000, 1_000_000];
@@ -248,6 +251,8 @@ export default function InternEditor() {
             </Group>
           ) : null}
 
+          {section === "mailboxes" ? <MailboxesSection name={name} value={form.mailboxes} onChange={(mailboxes) => update({ mailboxes })} /> : null}
+
           {section === "notify" ? (
             <Group
               title={`What reaches your phone from ${name}`}
@@ -289,6 +294,55 @@ export default function InternEditor() {
         </ScrollView>
       )}
     </Screen>
+  );
+}
+
+/** Every mailbox (including ones connected later), or only some. */
+function MailboxesSection({ name, value, onChange }: { name: string; value: string[] | null; onChange: (v: string[] | null) => void }) {
+  const { api } = useSettings();
+  const router = useRouter();
+  const [mailboxes, setMailboxes] = useState<MailboxStatus[] | null>(null);
+  useEffect(() => {
+    api.connectors().then((o) => setMailboxes(o.outlook.mailboxes), () => setMailboxes([]));
+  }, [api]);
+  if (!mailboxes) return <Loading />;
+  if (!mailboxes.length) {
+    return (
+      <Group footer="Connect a mailbox first; then choose here which ones they may use.">
+        <Row label="Connect Outlook" onPress={() => router.push("/connectors/outlook" as never)} />
+      </Group>
+    );
+  }
+  const all = value === null;
+  return (
+    <>
+      <Group footer={all ? `${name} can read and draft in every connected mailbox, including ones you add later.` : `${name} can only use the mailboxes switched on below.`}>
+        <Row
+          label="Every mailbox"
+          right={<Switch label="Every mailbox" value={all} onChange={(on) => onChange(on ? null : mailboxes.map((m) => m.id))} />}
+        />
+      </Group>
+      <Group title="Mailboxes">
+        {mailboxes.map((m) => {
+          const on = all || value!.includes(m.id);
+          return (
+            <Row
+              key={m.id}
+              label={m.label}
+              detail={m.account ?? undefined}
+              right={
+                <Switch
+                  label={m.label}
+                  value={on}
+                  disabled={all}
+                  onChange={(next) => onChange(next ? [...value!, m.id] : value!.filter((id) => id !== m.id))}
+                />
+              }
+            />
+          );
+        })}
+      </Group>
+    </>
   );
 }
 

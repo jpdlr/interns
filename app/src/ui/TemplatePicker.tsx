@@ -4,7 +4,8 @@
  * editable before anyone is hired. Templates that need something connected
  * first (Outlook, GitHub) say so instead of failing later.
  */
-import React, { useEffect, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import type { InternTemplate } from "../api";
 import { useSettings } from "../settings";
@@ -14,8 +15,8 @@ import { InternFace, resolveFaceId } from "./InternFace";
 import { Text } from "./Text";
 
 const NEED_LABEL: Record<InternTemplate["needs"][number], string> = {
-  outlook: "Needs Outlook",
-  github: "Needs GitHub",
+  outlook: "Connect Outlook",
+  github: "Connect GitHub",
 };
 
 export function useTemplates(): { templates: InternTemplate[]; loading: boolean; error: unknown } {
@@ -23,18 +24,21 @@ export function useTemplates(): { templates: InternTemplate[]; loading: boolean;
   const [templates, setTemplates] = useState<InternTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
-  useEffect(() => {
-    if (!configured) return;
-    let cancelled = false;
-    api
-      .templates()
-      .then((list) => !cancelled && setTemplates(list))
-      .catch((e) => !cancelled && setError(e))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [api, configured]);
+  // again on focus: coming back from Connectors, a starter may be ready now
+  useFocusEffect(
+    useCallback(() => {
+      if (!configured) return;
+      let cancelled = false;
+      api
+        .templates()
+        .then((list) => !cancelled && setTemplates(list))
+        .catch((e) => !cancelled && setError(e))
+        .finally(() => !cancelled && setLoading(false));
+      return () => {
+        cancelled = true;
+      };
+    }, [api, configured]),
+  );
   return { templates, loading, error };
 }
 
@@ -49,6 +53,7 @@ export function TemplatePicker({
   busyId?: string | null;
 }) {
   const { colors } = useAppTheme();
+  const router = useRouter();
   return (
     <View style={[styles.list, { borderColor: colors.border, backgroundColor: colors.surface }]}>
       {templates.map((template, index) => (
@@ -76,9 +81,18 @@ export function TemplatePicker({
             {!template.ready && template.needs.length ? (
               <View style={styles.needs}>
                 {template.needs.map((need) => (
-                  <View key={need} style={[styles.need, { borderColor: colors.border }]}>
-                    <Text variant="caption">{NEED_LABEL[need]}</Text>
-                  </View>
+                  <Pressable
+                    key={need}
+                    onPress={() => router.push(`/connectors/${need}` as never)}
+                    accessibilityRole="link"
+                    accessibilityLabel={NEED_LABEL[need]}
+                    hitSlop={6}
+                    style={({ pressed }) => [styles.need, { borderColor: colors.border }, pressed && { backgroundColor: colors.accentSoft }]}
+                  >
+                    <Text variant="caption" color={colors.text}>
+                      {NEED_LABEL[need]} ›
+                    </Text>
+                  </Pressable>
                 ))}
               </View>
             ) : null}

@@ -83,6 +83,10 @@ export const ListIcon = (p: IconProps) => <Icon {...p} d="M9 6.5h10.5M9 12h10.5M
 export const MailIcon = (p: IconProps) => (
   <Icon {...p} d="M5 5.5h14A1.5 1.5 0 0 1 20.5 7v10a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 17V7A1.5 1.5 0 0 1 5 5.5Zm-1 1 8 6.5 8-6.5" />
 );
+/** GitHub, drawn as a branch (no logos in the icon set). */
+export const BranchIcon = (p: IconProps) => (
+  <Icon {...p} d="M6.5 3.5v11M6.5 14.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5ZM17.5 4a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5ZM17.5 9c0 4-4.5 4-11 5.5" />
+);
 export const BulbIcon = (p: IconProps) => (
   <Icon {...p} d="M9.5 18h5M10.25 21h3.5M12 3a5.75 5.75 0 0 0-3.4 10.4c.55.42.9 1.04.9 1.73V15.5h5v-.37c0-.69.35-1.31.9-1.73A5.75 5.75 0 0 0 12 3Z" />
 );

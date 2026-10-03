@@ -101,6 +101,9 @@ function AppNavigation() {
               <Stack.Screen name="group/[id]" options={{ title: "Group" }} />
               <Stack.Screen name="files/[slug]" options={{ title: "Files" }} />
               <Stack.Screen name="spend" options={{ title: "Spend" }} />
+              <Stack.Screen name="connectors/index" options={{ title: "Connectors" }} />
+              <Stack.Screen name="connectors/outlook" options={{ title: "Outlook" }} />
+              <Stack.Screen name="connectors/github" options={{ title: "GitHub" }} />
               <Stack.Screen name="page/[id]" options={{ title: "" }} />
               <Stack.Screen name="history" options={{ title: "History" }} />
             </Stack>

@@ -241,7 +241,7 @@ export default function SetupScreen() {
               </Text>
               {templates.length ? <TemplatePicker templates={templates} busyId={opening} onPick={pick} /> : null}
               {templates.some((t) => !t.ready) ? (
-                <Text variant="caption">Some starters need Outlook or GitHub connected first; see Settings and the README.</Text>
+                <Button label="Connect Outlook or GitHub" tone="neutral" small onPress={() => router.push("/connectors" as never)} />
               ) : null}
               <Button label="Describe my own" tone="neutral" full disabled={Boolean(opening)} onPress={() => void finish("/hire")} />
               <Button label="Skip for now" tone="ghost" full disabled={Boolean(opening)} onPress={() => void finish("/")} />

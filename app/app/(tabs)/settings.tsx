@@ -6,7 +6,7 @@
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
-import { ApiError, createApi, type Intern, type NotifySettings } from "../../src/api";
+import { ApiError, createApi, type ConnectorsOverview, type Intern, type NotifySettings } from "../../src/api";
 import { NOTIFY_INFO } from "../../src/internFile";
 import { friendlyError } from "../../src/errors";
 import { useLive } from "../../src/live";
@@ -15,6 +15,7 @@ import { DEFAULT_BASE_URL, useSettings } from "../../src/settings";
 import { radius, scaledFont, space, useAppTheme, type TextSize, type ThemeMode } from "../../src/theme";
 import { Button } from "../../src/ui/Button";
 import { ConnectionPill } from "../../src/ui/ConnectionPill";
+import { githubSummary, outlookSummary } from "../../src/ui/ConnectorCard";
 import { Group, Row, Segmented, Switch } from "../../src/ui/Grouped";
 import { CheckIcon } from "../../src/ui/Icons";
 import { ErrorNote, Screen, ScreenTitle } from "../../src/ui/Screen";
@@ -250,6 +251,7 @@ export default function SettingsScreen() {
       <ScrollView contentContainerStyle={styles.body}>
         {/* Nothing else works until the token is in: put it first. */}
         {ready && !configured ? connection : null}
+        {configured ? <ConnectorsGroup /> : null}
 
         <Group title="Appearance" footer={mode === "system" ? `Following this device · currently ${scheme}.` : undefined}>
           <Row
@@ -296,6 +298,31 @@ export default function SettingsScreen() {
         </Group>
       </ScrollView>
     </Screen>
+  );
+}
+
+/** Outlook and GitHub with where they stand; each opens its own screen (app/connectors). */
+function ConnectorsGroup() {
+  const { api } = useSettings();
+  const router = useRouter();
+  const [overview, setOverview] = useState<ConnectorsOverview | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      let live = true;
+      api.connectors().then((o) => live && setOverview(o), () => {});
+      return () => {
+        live = false;
+      };
+    }, [api]),
+  );
+  const outlook = overview ? outlookSummary(overview.outlook) : null;
+  const github = overview ? githubSummary(overview.github) : null;
+  return (
+    <Group title="Connectors" footer="The tools your interns work in. Mail stays drafts and reviews stay proposals until you approve them.">
+      <Row label="Outlook" detail={outlook?.text} onPress={() => router.push("/connectors/outlook" as never)} />
+      <Row label="GitHub" detail={github?.text} onPress={() => router.push("/connectors/github" as never)} />
+      <Row label="Something else" onPress={() => router.push("/connectors" as never)} />
+    </Group>
   );
 }
 

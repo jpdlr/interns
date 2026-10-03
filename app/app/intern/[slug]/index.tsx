@@ -27,7 +27,7 @@ import { EmptyState, ErrorNote, Loading, Screen } from "../../../src/ui/Screen";
 import { InternPages, StandingOrders } from "../../../src/ui/StandingOrders";
 import { Text } from "../../../src/ui/Text";
 
-type Section = "about" | "personality" | "instructions" | "schedule" | "work" | "tools" | "budget" | "notify";
+type Section = "about" | "personality" | "instructions" | "schedule" | "work" | "tools" | "budget" | "notify" | "mailboxes";
 
 export default function InternProfile() {
   const { colors } = useAppTheme();
@@ -42,6 +42,20 @@ export default function InternProfile() {
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [archiveError, setArchiveError] = useState<unknown>(null);
   const [week, setWeek] = useState<InternWeek | null>(null);
+  /** connected mailbox labels, for the Mailboxes row */
+  const [mailboxLabels, setMailboxLabels] = useState<Record<string, string> | null>(null);
+  const outlookUser = Boolean(manifest && (manifest.tools.includes("mail") || manifest.tools.includes("calendar")));
+  useEffect(() => {
+    if (!configured || !outlookUser) return;
+    let live = true;
+    api.connectors().then(
+      (o) => live && setMailboxLabels(Object.fromEntries(o.outlook.mailboxes.map((m) => [m.id, m.label]))),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [api, configured, outlookUser, manifest?.mailboxes]);
 
   // "This week" is a nice-to-have: a failure just leaves the section out.
   useEffect(() => {
@@ -137,6 +151,14 @@ export default function InternProfile() {
   const paused = manifest.paused ?? false;
   const used = Math.min(1, cap ? spent / cap : 0);
   const hasMail = manifest.tools.includes("mail");
+  const hasCalendar = manifest.tools.includes("calendar");
+  const mailboxValue = (() => {
+    const connected = mailboxLabels ? Object.keys(mailboxLabels) : null;
+    if (connected && connected.length === 0) return "None connected";
+    if (!manifest.mailboxes) return "All";
+    if (manifest.mailboxes.length === 0) return "None";
+    return manifest.mailboxes.map((id) => mailboxLabels?.[id] ?? id).join(", ");
+  })();
   const toolNames = manifest.tools.map((t) => TOOL_INFO[t]?.label ?? t);
   const firstLine = (text: string) => text.split(/\n/).find((l) => l.trim())?.trim() ?? "";
 
@@ -207,6 +229,13 @@ export default function InternProfile() {
             detail={hasMail ? undefined : "Needs the Outlook mail tool"}
             right={<Switch label="Wake on new mail" disabled={!hasMail && !manifest.triggers.mail_push} value={manifest.triggers.mail_push ?? false} onChange={(v) => void quickSave((m) => ({ ...m, triggers: { ...m.triggers, mail_push: v } }), { triggers: { mail_push: v } })} />}
           />
+          {hasCalendar ? (
+            <Row
+              label="Meeting briefs"
+              detail="A short brief before meetings with people from outside"
+              right={<Switch label="Meeting briefs" value={manifest.triggers.meeting_brief ?? false} onChange={(v) => void quickSave((m) => ({ ...m, triggers: { ...m.triggers, meeting_brief: v } }), { triggers: { meeting_brief: v } })} />}
+            />
+          ) : null}
           <Row label="Standing work" value={manifest.backlog.length ? `${manifest.backlog.length} item${manifest.backlog.length === 1 ? "" : "s"}` : "None"} onPress={() => open("work")} />
         </Group>
 
@@ -216,6 +245,7 @@ export default function InternProfile() {
 
         <Group title="What they can use">
           <Row label="Tools" value={toolNames.length <= 2 ? toolNames.join(", ") || "None" : `${toolNames.length} on`} onPress={() => open("tools")} />
+          {hasMail || hasCalendar ? <Row label="Mailboxes" value={mailboxValue} onPress={() => open("mailboxes")} /> : null}
         </Group>
 
         <StandingOrders slug={slug!} name={manifest.name} />

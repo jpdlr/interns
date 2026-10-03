@@ -255,7 +255,9 @@ export interface InternManifestDetail {
   persona: string;
   system_prompt: string;
   tools: string[];
-  triggers: { cron?: string | null; mentions?: boolean; mail_push?: boolean };
+  triggers: { cron?: string | null; mentions?: boolean; mail_push?: boolean; meeting_brief?: boolean };
+  /** Outlook mailboxes this intern may use; null = every connected one */
+  mailboxes?: string[] | null;
   backlog: string[];
   guardrails: { drafts_only: boolean; daily_token_cap: number };
   /** no schedule, mail, meetings, reviews or routing; JP's own messages still reach them */
@@ -286,6 +288,58 @@ export interface NotifySettings {
 }
 
 /** GET /interns/:slug/week — the profile's "This week". */
+/** One connected Outlook mailbox (GET /connectors). */
+export interface MailboxStatus {
+  id: string;
+  label: string;
+  /** the signed-in address */
+  account: string | null;
+  signed_in: boolean;
+  /** the first one: graph-mail's default */
+  default: boolean;
+  /** what the mail watcher saw on its last polls */
+  health: { last_ok_at: string | null; last_error: string | null; failures: number } | null;
+  /** the last "Check" from this screen */
+  check: { at: string; ok: boolean; unread?: number; error?: string } | null;
+  used_by: { slug: string; name: string }[];
+}
+
+/** Microsoft sign-in in progress: the code to show and where to enter it. */
+export interface OutlookLogin {
+  id: string;
+  mailbox: string;
+  label: string;
+  state: "waiting" | "connected" | "failed" | "cancelled";
+  user_code: string;
+  verification_uri: string;
+  expires_at: string;
+  account: string | null;
+  error: string | null;
+}
+
+export interface OutlookConnector {
+  /** the owner's Entra app registration; needed before the first sign-in */
+  app: { client_id: string | null; authority: string };
+  calendar_mailbox: string | null;
+  mailboxes: MailboxStatus[];
+  sessions: OutlookLogin[];
+}
+
+export interface GithubConnector {
+  connected: boolean;
+  app: { name: string; slug: string; html_url: string; owner: string | null } | null;
+  installations: { login: string; type: string | null; all_repositories: boolean; suspended: boolean; enabled: boolean }[];
+  reviewer: { slug: string; name: string; has_tool: boolean } | null;
+  /** at least one account has reviews on */
+  polling: boolean;
+  error: string | null;
+}
+
+export interface ConnectorsOverview {
+  outlook: OutlookConnector;
+  github: GithubConnector;
+}
+
 export interface InternWeek {
   since: string;
   /** "Reviewed 2 PRs, answered 7 messages" — empty when nothing finished */
@@ -310,7 +364,7 @@ export interface InternWeek {
 export type InternManifestPatch = Partial<
   Pick<
     InternManifestDetail,
-    "name" | "role" | "icon" | "persona" | "system_prompt" | "tools" | "triggers" | "backlog" | "guardrails" | "paused" | "notify"
+    "name" | "role" | "icon" | "persona" | "system_prompt" | "tools" | "triggers" | "backlog" | "guardrails" | "paused" | "notify" | "mailboxes"
   >
 >;
 
@@ -871,6 +925,68 @@ export class InternsApi {
       method: "PATCH",
       body: JSON.stringify(patch),
     });
+  }
+
+  // ------------------------------------------------------------ connectors
+
+  connectors(): Promise<ConnectorsOverview> {
+    return this.request<ConnectorsOverview>("/connectors");
+  }
+
+  /** The Application (client) ID of the owner's Entra app registration. */
+  setOutlookApp(clientId: string, authority?: string): Promise<OutlookConnector> {
+    return this.request<OutlookConnector>("/connectors/outlook/app", { method: "PUT", body: JSON.stringify({ client_id: clientId, ...(authority ? { authority } : {}) }) });
+  }
+
+  /** Start Microsoft sign-in for a new mailbox (or `mailbox` to reconnect one); resolves with the code to show. */
+  startOutlookLogin(label: string, mailbox?: string): Promise<OutlookLogin> {
+    return this.request<OutlookLogin>("/connectors/outlook/mailboxes", { method: "POST", body: JSON.stringify({ label, ...(mailbox ? { mailbox } : {}) }) });
+  }
+
+  outlookLogin(id: string): Promise<OutlookLogin> {
+    return this.request<OutlookLogin>(`/connectors/outlook/sessions/${encodeURIComponent(id)}`);
+  }
+
+  cancelOutlookLogin(id: string): Promise<unknown> {
+    return this.request(`/connectors/outlook/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  updateMailbox(id: string, patch: { label?: string; calendar?: boolean; default?: boolean }): Promise<OutlookConnector> {
+    return this.request<OutlookConnector>(`/connectors/outlook/mailboxes/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) });
+  }
+
+  checkMailbox(id: string): Promise<{ at: string; ok: boolean; unread?: number; error?: string }> {
+    return this.request(`/connectors/outlook/mailboxes/${encodeURIComponent(id)}/check`, { method: "POST" });
+  }
+
+  removeMailbox(id: string): Promise<OutlookConnector> {
+    return this.request<OutlookConnector>(`/connectors/outlook/mailboxes/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  githubConnector(): Promise<GithubConnector> {
+    return this.request<GithubConnector>("/connectors/github");
+  }
+
+  /** The prefilled App manifest and the github.com page to post it to. */
+  githubSetup(login: string, origin: string): Promise<{ action: string; manifest: Record<string, unknown> }> {
+    return this.request("/connectors/github/setup", { method: "POST", body: JSON.stringify({ login, origin }) });
+  }
+
+  /** A one-time link to install the App on another account. */
+  githubInstallUrl(origin: string): Promise<{ url: string }> {
+    return this.request("/connectors/github/install", { method: "POST", body: JSON.stringify({ origin }) });
+  }
+
+  syncGithub(): Promise<GithubConnector> {
+    return this.request<GithubConnector>("/connectors/github/sync", { method: "POST" });
+  }
+
+  updateGithub(patch: { accounts?: Record<string, boolean>; reviewer?: string }): Promise<GithubConnector> {
+    return this.request<GithubConnector>("/connectors/github", { method: "PATCH", body: JSON.stringify(patch) });
+  }
+
+  disconnectGithub(): Promise<GithubConnector> {
+    return this.request<GithubConnector>("/connectors/github", { method: "DELETE" });
   }
 
   /** Summary times and quiet hours for the lock screen. */

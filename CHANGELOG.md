@@ -5,6 +5,19 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Connectors** (Settings › Connectors): connect Outlook and GitHub from the app, with
+  no terminal, config editing or restart.
+  - **Outlook**: guided Microsoft sign-in setup, then device-code sign-in per mailbox.
+    Several mailboxes are supported; each can be renamed, made the default or the
+    calendar source, checked, re-signed-in or disconnected.
+  - **GitHub**: the App manifest flow from the browser. Turn reviews on per installed
+    account and choose the reviewer.
+- **Mailboxes per intern**: limit an intern to some Outlook mailboxes (`mailboxes` in the
+  manifest). `graph-mail` and `graph-cal` enforce it, and the intern is told which it has.
+- **Meeting briefs** switch on the intern profile (`triggers.meeting_brief` in the
+  manifest API).
+
 ### Changed
 - **Schedules run on your clock.** Intern schedules, `standup_cron` and `suggest_cron`
   are matched in your `timezone` (daylight saving included) instead of the server's

@@ -30,6 +30,101 @@ const owner = {
   connected: { outlook: process.env.MOCK_FRESH ? [] : ["work"], github: false, discord: false, push: true },
 };
 
+/** Connectors state: MOCK_FRESH starts with nothing connected; MOCK_GITHUB=1 starts GitHub connected. */
+const connectorState = {
+  client_id: process.env.MOCK_FRESH ? null : "11111111-2222-3333-4444-555555555555",
+  authority: "organizations",
+  calendar: "work",
+  mailboxes: process.env.MOCK_FRESH
+    ? []
+    : [
+        { id: "work", label: "Work", account: "sam@northwind.example", signed_in: true, health: { last_ok_at: new Date(Date.now() - 4 * 60e3).toISOString(), last_error: null, failures: 0 }, check: null },
+        { id: "willowbrook", label: "Willowbrook Vet", account: "sam@willowbrook.example", signed_in: true, health: { last_ok_at: null, last_error: "Graph token unavailable — re-run tools/graph-login --mailbox willowbrook", failures: 4 }, check: null },
+      ],
+  sessions: new Map(),
+  github: process.env.MOCK_GITHUB
+    ? { connected: true, app: { name: "Interns for northwind", slug: "interns-for-northwind", html_url: "https://github.com/apps/interns-for-northwind", owner: "northwind" }, installations: [{ login: "northwind", type: "Organization", all_repositories: true, suspended: false, enabled: true }, { login: "sam", type: "User", all_repositories: false, suspended: false, enabled: false }], reviewer: { slug: "nia", name: "Nia", has_tool: true }, polling: true, error: null }
+    : { connected: false, app: null, installations: [], reviewer: null, polling: false, error: null },
+};
+
+function outlookView() {
+  const c = connectorState;
+  return {
+    app: { client_id: c.client_id, authority: c.authority },
+    calendar_mailbox: c.calendar,
+    mailboxes: c.mailboxes.map((m, i) => ({ ...m, default: i === 0, used_by: i === 0 ? [{ slug: "milo", name: "Milo" }] : [] })),
+    sessions: [...c.sessions.values()].filter((x) => x.state === "waiting"),
+  };
+}
+
+function connectorRoute(req, path, json) {
+  const c = connectorState;
+  const body = () => new Promise((resolve) => { let raw = ""; req.on("data", (d) => (raw += d)); req.on("end", () => resolve(JSON.parse(raw || "{}"))); });
+  if (path === "/connectors" && req.method === "GET") return json(200, { outlook: outlookView(), github: c.github });
+  if (path === "/connectors/github" && req.method === "GET") return json(200, c.github);
+  if (path === "/connectors/outlook/app" && req.method === "PUT") {
+    return void body().then((b) => {
+      if (!/^[0-9a-f-]{36}$/i.test(b.client_id ?? "")) return json(400, { error: "That doesn't look like an Application (client) ID." });
+      c.client_id = b.client_id;
+      c.authority = b.authority ?? c.authority;
+      json(200, outlookView());
+    });
+  }
+  if (path === "/connectors/outlook/mailboxes" && req.method === "POST") {
+    return void body().then((b) => {
+      const label = (b.label || "Outlook").trim();
+      const id = b.mailbox ?? label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      const session = { id: `s${Date.now()}`, mailbox: id, label, state: "waiting", user_code: "QX7P-4KMD", verification_uri: "https://microsoft.com/devicelogin", expires_at: new Date(Date.now() + 15 * 60e3).toISOString(), account: null, error: null, polls: 0 };
+      c.sessions.set(session.id, session);
+      json(200, session);
+    });
+  }
+  let m = /^\/connectors\/outlook\/sessions\/([^/]+)$/.exec(path);
+  if (m) {
+    const session = c.sessions.get(m[1]);
+    if (!session) return json(404, { error: "no such sign-in" });
+    if (req.method === "DELETE") return (session.state = "cancelled"), json(200, { ok: true });
+    if (session.state === "waiting" && ++session.polls >= 3) {
+      session.state = "connected";
+      session.account = `sam@${session.mailbox}.example`;
+      const existing = c.mailboxes.find((x) => x.id === session.mailbox);
+      if (existing) Object.assign(existing, { signed_in: true, health: { last_ok_at: new Date().toISOString(), last_error: null, failures: 0 }, check: null });
+      else c.mailboxes.push({ id: session.mailbox, label: session.label, account: session.account, signed_in: true, health: null, check: null });
+    }
+    return json(200, session);
+  }
+  m = /^\/connectors\/outlook\/mailboxes\/([^/]+)(\/check)?$/.exec(path);
+  if (m) {
+    const box = c.mailboxes.find((x) => x.id === m[1]);
+    if (!box) return json(404, { error: "No such mailbox." });
+    if (m[2]) return (box.check = box.health?.failures ? { at: new Date().toISOString(), ok: false, error: "token expired" } : { at: new Date().toISOString(), ok: true, unread: 3 }), json(200, box.check);
+    if (req.method === "DELETE") return (c.mailboxes = c.mailboxes.filter((x) => x !== box)), json(200, outlookView());
+    if (req.method === "PATCH") {
+      return void body().then((b) => {
+        if (b.label) box.label = b.label;
+        if (b.calendar) c.calendar = box.id;
+        if (b.default) c.mailboxes = [box, ...c.mailboxes.filter((x) => x !== box)];
+        json(200, outlookView());
+      });
+    }
+  }
+  if (path === "/connectors/github/setup" && req.method === "POST") return json(200, { action: "about:blank", manifest: { name: "Interns" } });
+  if (path === "/connectors/github/install" && req.method === "POST") return json(200, { url: "about:blank" });
+  if (path === "/connectors/github/sync" && req.method === "POST") return json(200, c.github);
+  if (path === "/connectors/github" && req.method === "PATCH") {
+    return void body().then((b) => {
+      for (const [login, on] of Object.entries(b.accounts ?? {})) {
+        const i = c.github.installations.find((x) => x.login === login);
+        if (i) i.enabled = on;
+      }
+      if (b.reviewer) c.github.reviewer = { slug: b.reviewer, name: interns.find((i) => i.slug === b.reviewer)?.name ?? b.reviewer, has_tool: true };
+      json(200, c.github);
+    });
+  }
+  if (path === "/connectors/github" && req.method === "DELETE") return (c.github = { connected: false, app: null, installations: [], reviewer: null, polling: false, error: null }), json(200, c.github);
+  return json(404, { error: "no such connector route" });
+}
+
 /** The real starter templates (orchestrator/templates), read with the orchestrator's yaml package when it's installed. */
 const templates = (() => {
   try {
@@ -63,7 +158,7 @@ const TYPES = {
 };
 
 /** Routes the API owns. Note /cards is both an API route and an app route. */
-const API_PATHS = /^\/(owner|templates|notify|interns|tasks|cards|activity|hire|events|meta|push|github|attachments|rooms|reports|suggest|messages|pages|rules|agenda|ideas)(\/|$)/;
+const API_PATHS = /^\/(connectors|owner|templates|notify|interns|tasks|cards|activity|hire|events|meta|push|github|attachments|rooms|reports|suggest|messages|pages|rules|agenda|ideas)(\/|$)/;
 const isApiPath = (path) => API_PATHS.test(path);
 
 /** An asset as-is, else the route's own page (as the orchestrator does), else Expo's not-found page. */
@@ -197,8 +292,9 @@ const manifests = {
     slug: "milo", name: "Milo", role: "Personal assistant · mail + follow-ups", icon: "face-05",
     persona: "Milo is unflappable and terse. Reports what's owed, what's drafted, what needs Sam — nothing padded.",
     system_prompt: "You are Milo, Sam's personal assistant for mail and follow-ups. Watch the inbox, detect threads Sam owes a reply, draft replies for approval. Anything outbound is a DRAFT ONLY — never send. Report back with what you found, what you drafted, and what you need from Sam.",
-    tools: ["mail", "cards", "fs.read"],
-    triggers: { cron: "0 7 * * 1-5", mentions: true, mail_push: true },
+    tools: ["mail", "calendar", "cards", "fs.read"],
+    triggers: { cron: "0 9 * * 1-5", mentions: true, mail_push: true, meeting_brief: true },
+    mailboxes: null,
     backlog: [
       "Sweep the inbox for threads older than 48h with no reply",
       "Chase the Side Project invoice thread once a week",
@@ -650,6 +746,9 @@ const server = http.createServer((req, res) => {
       json(200, card);
     });
   }
+
+  // Connectors (orchestrator/src/connectors.ts): Outlook sign-in completes on the third poll.
+  if (path.startsWith("/connectors")) return connectorRoute(req, path, json);
 
   if (path === "/owner" && req.method === "GET") return json(200, owner);
   if (path === "/owner" && req.method === "PATCH") {

@@ -194,58 +194,63 @@ See [app/README.md](app/README.md) for details.
 <summary><b>📧 Outlook mail and calendar (Microsoft Graph)</b></summary>
 
 Interns get two CLIs. `graph-mail` can read mail and create **drafts**; it has no send
-command. `graph-cal` is **read-only**.
+command. `graph-cal` is **read-only**. Connect everything from the app in
+**Settings › Connectors › Outlook**:
 
-1. In the [Microsoft Entra admin center](https://entra.microsoft.com), go to
-   **App registrations › New registration**. Any name works. Choose who can sign in.
-2. Under **Authentication**, turn on **Allow public client flows** (this enables device
-   code sign-in). No secret is needed.
-3. Under **API permissions**, add the delegated Microsoft Graph permissions
-   `Mail.ReadWrite` and `Calendars.Read`.
-4. Copy the **Application (client) ID** into `~/.interns/config.json`:
+1. **Microsoft sign-in, once.** The screen walks you through an app registration in the
+   [Microsoft Entra admin center](https://entra.microsoft.com):
+   - New registration, any name; choose who can sign in.
+   - **Authentication › Allow public client flows** on (device-code sign-in; no secret).
+   - **API permissions**: delegated Microsoft Graph `Mail.ReadWrite` and `Calendars.Read`.
 
-   ```json
-   "graph": { "client_id": "00000000-0000-0000-0000-000000000000", "authority": "organizations" }
-   ```
+   Paste its **Application (client) ID** and pick work/school, any, or personal accounts.
+2. **Add a mailbox.** Name it ("Work"), tap **Get a sign-in code**, and enter the code at
+   microsoft.com/devicelogin with that mailbox's account. The screen notices when you're
+   done. Add as many as you like, such as a second company or a shared inbox. The first is
+   the default. Any one of them can provide the calendar for Today and meeting briefs.
+   A work domain you sign in with is added to `own_domains`. Nothing restarts.
+3. **Choose who uses what.** On an intern's profile, **Mailboxes** limits them to some
+   mailboxes, or all of them, including ones you add later. **Wake on new mail** and
+   **Meeting briefs** are switches there too. The mail tools enforce the limit
+   themselves, whatever `engine.permission_mode` is.
 
-   Use `"common"` or `"consumers"` as the authority for personal Microsoft accounts.
-5. Install the one Python dependency and sign in to each mailbox:
+The screen shows each mailbox's state. When a sign-in expires, **Sign in again** keeps
+its name, drafts ledger and intern limits.
 
-   ```sh
-   python3 -m venv orchestrator/.venv
-   orchestrator/.venv/bin/pip install -r orchestrator/tools/requirements.txt
-   orchestrator/tools/graph-login --mailbox work      # prints a code for microsoft.com/devicelogin
-   ```
+The one Python dependency (`msal`) must be installed for the tools:
 
-   This stores a token cache in `~/.interns/mailboxes/work/` and adds `work` to
-   `"mailboxes"`. Repeat for other mailboxes. The first one is the default, and
-   `calendar_mailbox` picks the calendar used for meeting briefs.
-6. Set `own_domains` to your organisation's email domains. Meetings with anyone outside
-   them get a brief beforehand and a short "how did it go?" afterwards. Restart the
-   orchestrator.
+```sh
+python3 -m venv orchestrator/.venv
+orchestrator/.venv/bin/pip install -r orchestrator/tools/requirements.txt
+```
 
-Give an intern the `mail` / `calendar` tools and the `mail_push` / `meeting_brief`
-triggers, either when hiring or on its profile.
+Prefer a terminal? `orchestrator/tools/graph-login --mailbox work` does the same sign-in.
+It needs `graph.client_id` in `~/.interns/config.json` and a restart afterwards.
 </details>
 
 <details>
 <summary><b>🐙 GitHub pull request reviews</b></summary>
 
-A reviewer intern reads PRs through a **GitHub App**, which uses short-lived tokens, and
-prepares reviews that are only published when you press **Publish review**.
+A reviewer intern reads PRs through a **GitHub App**, which uses short-lived tokens. It
+prepares reviews that are only published when you press **Publish review**. Connect it in
+**Settings › Connectors › GitHub**:
 
-- Create a private GitHub App with **Metadata: read**, **Contents: read**, **Checks:
-  read** and **Pull requests: read & write**, and install it on the repositories you
-  want reviewed. `npm run setup:github -- https://YOUR-HOST/github-setup YOUR_LOGIN`
-  walks you through it with a manifest flow (it needs an HTTPS URL that reaches this
-  machine, e.g. Tailscale Funnel).
-- Or fill in `github.app_id`, `github.installation_id`, `github.private_key_path` (keep
-  the key outside the repo) and the `github.repositories` allowlist by hand.
-- Webhooks are optional; the orchestrator polls every `github.poll_minutes`.
+1. Enter the GitHub user or organization that should own the app and tap **Continue to
+   GitHub**. GitHub shows a prefilled private app: **Metadata**, **Contents** and
+   **Checks** read, **Pull requests** read & write. Press **Create**.
+2. GitHub then asks where to install it. Choose the repositories, and you land back in
+   the app.
+3. Turn reviews on per account. Then pick the **reviewer**, who gets the `github` tool.
 
-Hiring a code reviewer then shows `github` as a missing capability. Approving it
-activates the tool for that intern. See
-[orchestrator/README.md › GitHub App setup](orchestrator/README.md#github-app-setup).
+Every redirect happens in your browser, so the orchestrator never has to be reachable
+from the internet. The app's key is stored as `~/.interns/github-app.pem` (0600). To
+review more organizations, add them from the same screen. An app created under a
+personal account has to be made public in its GitHub settings before an organization
+can install it. Webhooks are optional; the orchestrator polls every
+`github.poll_minutes`.
+
+The older terminal flow (`npm run setup:github`) and filling in `github.*` by hand still
+work. See [orchestrator/README.md › GitHub App setup](orchestrator/README.md#github-app-setup).
 </details>
 
 <details>

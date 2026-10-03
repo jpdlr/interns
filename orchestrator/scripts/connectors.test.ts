@@ -245,7 +245,7 @@ try {
     assert.equal(res.body.manifest.setup_url, "https://interns.example.com/oauth/github/installed");
     assert.equal(res.body.manifest.public, false);
     assert.deepEqual(res.body.manifest.default_permissions, { metadata: "read", contents: "read", checks: "read", pull_requests: "write" });
-    const user = await call("POST", "/connectors/github/setup", { login: "sam", origin: "http://100.64.0.1:7810" });
+    const user = await call("POST", "/connectors/github/setup", { login: "sam", origin: "http://192.0.2.10:7810" });
     assert.match(user.body.action, /^https:\/\/github\.com\/settings\/apps\/new\?state=/);
     (globalThis as { state?: string }).state = new URL(res.body.action).searchParams.get("state")!;
   });
