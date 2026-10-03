@@ -8,6 +8,7 @@ import type { Style } from "../../api";
 import { DEFAULT_STYLE, DIALS, sampleReply } from "../../style";
 import { radius, scaledFont, space, useAppTheme } from "../../theme";
 import { GrowingInput } from "../GrowingInput";
+import { CheckIcon, ChevronRightIcon, EditIcon } from "../Icons";
 import { InternFace } from "../InternFace";
 import { Text } from "../Text";
 import { Dial } from "./Dial";
@@ -34,10 +35,16 @@ export function PersonalityCard({
   return (
     <Section title="Personality" hint="How they talk to you. Change it any time on their profile.">
       <StyleDials faceId={faceId} style={current} onStyle={onStyle} />
-      <Pressable onPress={() => setWords((v) => !v)} accessibilityRole="button" hitSlop={8}>
-        <Text variant="subtle" color={colors.accent} style={styles.link}>
+      <Pressable
+        onPress={() => setWords((v) => !v)}
+        accessibilityRole="button"
+        style={({ pressed }) => [styles.describe, { borderColor: colors.border, backgroundColor: pressed ? colors.accentSoft : colors.surface }]}
+      >
+        {words ? <CheckIcon size={18} color={colors.text} /> : <EditIcon size={18} color={colors.text} />}
+        <Text variant="subtle" color={colors.text} style={[styles.link, styles.flex]}>
           {words ? "Done" : `Describe ${name.trim() || "them"} in your own words`}
         </Text>
+        {words ? null : <ChevronRightIcon size={16} color={colors.textFaint} />}
       </Pressable>
       {words ? (
         <GrowingInput
@@ -93,6 +100,8 @@ const styles = StyleSheet.create({
   sampleRow: { flexDirection: "row", alignItems: "flex-end", gap: space.sm },
   bubble: { flex: 1, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.lg, borderBottomLeftRadius: 4, padding: space.md },
   link: { fontWeight: "600" },
+  flex: { flex: 1 },
+  describe: { flexDirection: "row", alignItems: "center", gap: space.sm, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingHorizontal: space.md, paddingVertical: space.md },
   input: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingHorizontal: space.lg, paddingVertical: space.md },
 });
 
