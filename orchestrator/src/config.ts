@@ -16,6 +16,8 @@ export const ConfigSchema = z.object({
   owner_name: z.string().min(1).default("Boss"),
   /** IANA time zone for Today, agendas and calendar times; empty = this machine's zone */
   timezone: z.string().default(""),
+  /** set when the app's first-run setup finishes; empty = show setup (unless a crew already exists) */
+  setup_completed_at: z.string().default(""),
   /** localhost-only HTTP API port */
   port: z.number().int().default(7810),
   /** static bearer token for the HTTP API, generated on first run */

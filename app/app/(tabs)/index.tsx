@@ -75,10 +75,29 @@ export default function CrewScreen() {
   const { colors, fontScale } = useAppTheme();
   const { width } = useWindowDimensions();
   const { api, ready, configured } = useSettings();
+
   const { status: streamStatus } = useLive();
   const refreshSignal = useRefreshSignal();
   const focused = useIsFocused();
   const router = useRouter();
+
+  // First run: no token yet, or a fresh orchestrator with nobody hired.
+  // An older orchestrator without /owner just keeps the Crew tab.
+  useEffect(() => {
+    if (!ready) return;
+    if (!configured) {
+      router.replace("/setup" as never);
+      return;
+    }
+    let cancelled = false;
+    api
+      .owner()
+      .then((owner) => !cancelled && !owner.setup_complete && router.replace("/setup" as never))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [api, configured, ready, router]);
   const { archived } = useLocalSearchParams<{ archived?: string }>();
 
   const [interns, setInterns] = useState<Intern[]>([]);

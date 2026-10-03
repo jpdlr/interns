@@ -33,7 +33,8 @@ you approve.
   files and allowlist of tools.
 - **Hire in one sentence.** Say "someone to watch my inbox for things I owe people". The
   coordinator drafts the role, a personality, a system prompt, tools, a schedule and a
-  budget. You edit any of it and pick a face, then hire.
+  budget. You edit any of it and pick a face, then hire. Or start from one of seven
+  [starter interns](#starter-interns).
 - **They work while you don't.** Cron schedules, standing backlogs, new mail, upcoming
   meetings and GitHub pull requests all become tasks. One task runs per intern at a time,
   and different interns run in parallel.
@@ -135,22 +136,41 @@ npm start
 
 On first start the orchestrator creates `~/.interns/config.json` (mode `0600`) with a
 random API token and Web Push keys, and serves the app at **http://127.0.0.1:7810**.
+Open it and the setup screen walks you through the rest:
 
-1. Stop it (Ctrl-C) and set at least your name and time zone in `~/.interns/config.json`:
+1. **Connect this device.** Paste the `api_token` from `~/.interns/config.json`. It stays
+   on the device.
+2. **About you.** Enter your name (what the crew calls you), your time zone (prefilled
+   from the device) and, optionally, your work email domains.
+3. **Who's first?** Pick a [starter intern](#starter-interns) or describe someone in your
+   own words. Either way you see and can edit the whole job description before anyone is
+   hired.
 
-   ```json
-   { "owner_name": "Sam", "timezone": "Europe/London" }
-   ```
-
-2. Start it again, open http://127.0.0.1:7810 and paste the `api_token` from the config
-   file into **Settings › Connection**.
-3. Tap **+** on the Crew tab and describe who you need. Two interns always exist: the
-   **Chaos Coordinator** (your front desk) and **Forge** (who builds missing
-   integrations, see below).
+Two interns always exist: the **Chaos Coordinator** (your front desk) and **Forge** (who
+builds missing integrations, see below).
 
 > **Try it without credentials.** `cd app && npm run mock` starts a fake orchestrator with
 > a demo crew on port 7811. Run `npx expo start --web` in another terminal and connect to
 > `http://127.0.0.1:7811` with the token `test-token-abc`.
+
+## Starter interns
+
+Ready-made crew members in [`orchestrator/templates/`](orchestrator/templates/). Pick one in
+Setup or on the Hire screen, change anything you like, and hire.
+
+| | Intern | What they do | Needs |
+| --- | --- | --- | --- |
+| <img src="avatars/png/face-05.png" width="32"> | **Milo** · Inbox assistant | Watches your inbox, tells you what you owe people and drafts the replies | Outlook |
+| <img src="avatars/png/face-11.png" width="32"> | **Nia** · Meeting briefer | Briefs you before meetings with outside people, asks how they went afterwards | Outlook |
+| <img src="avatars/png/face-19.png" width="32"> | **Rowan** · Chief of staff | Plans your day each weekday morning from your calendar, inbox and open cards | Outlook |
+| <img src="avatars/png/face-14.png" width="32"> | **Iris** · Researcher | Digs into any question on the web and comes back with a sourced answer | — |
+| <img src="avatars/png/face-02.png" width="32"> | **Pia** · Writer | Turns rough notes into posts, newsletters and docs in your voice | — |
+| <img src="avatars/png/face-01.png" width="32"> | **Rhea** · Code reviewer | Prepares pull request reviews that you publish with one tap | GitHub App |
+| <img src="avatars/png/face-17.png" width="32"> | **Zara** · Ops watchdog | Checks this machine on a schedule and speaks up only when something's wrong | — |
+
+A template is an ordinary intern manifest plus `summary` and `order`. To change a starter
+for your install only, or add your own, put a YAML file with the same name in
+`~/.interns/templates/`.
 
 ## Connecting things
 
@@ -267,6 +287,36 @@ every key. The ones you'll most likely touch:
 Each intern is a YAML file at `~/.interns/<slug>/intern.yaml` (role, persona, system
 prompt, tools, triggers, backlog, guardrails). You can edit it from the intern's profile
 in the app or in any text editor.
+
+## Your own install
+
+Keep one checkout of this repository and put everything personal outside it, so
+`git pull` never conflicts with your setup:
+
+| What | Where |
+| --- | --- |
+| Settings, secrets, your name and time zone, mailboxes | `~/.interns/config.json` |
+| Your crew (each intern's manifest, memory and files) | `~/.interns/<slug>/` |
+| Your own or tweaked starter interns | `~/.interns/templates/*.yaml` |
+| Service environment (e.g. `INTERNS_APP_DIST`) | a systemd drop-in, `systemctl --user edit interns-orchestrator` |
+| The Python venv for the Outlook tools | `orchestrator/.venv` (ignored by git; a symlink works) |
+| Any other local-only file in the checkout | add it to `.git/info/exclude` |
+
+For example, a personal machine that lets every intern run any tool, with work mail and
+a company PR viewer, only needs this in its config:
+
+```json
+{
+  "owner_name": "Sam",
+  "timezone": "Europe/London",
+  "own_domains": ["example.com"],
+  "mailboxes": ["work", "personal"],
+  "engine": { "permission_mode": "bypassPermissions" },
+  "github": { "codeops_base_url": "https://codeops.example.com", "codeops_owners": ["example-org"], "codeops_label": "CodeOps" }
+}
+```
+
+To update: `git pull`, then rebuild (below) and restart.
 
 ## Running it as a service
 

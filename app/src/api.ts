@@ -29,6 +29,37 @@ export type CardActionKind = "button" | "date" | "text";
 export type MessageAuthor = "jp" | "intern" | "coordinator";
 export type MessageSurface = "app" | "discord" | "system";
 
+/** GET/PATCH /owner: who the crew works for, and the first-run setup state. */
+export interface OwnerSettings {
+  owner_name: string;
+  /** the effective IANA zone (the server's own when none is configured) */
+  timezone: string;
+  timezone_configured: boolean;
+  own_domains: string[];
+  setup_complete: boolean;
+  /** interns hired so far, not counting Forge */
+  hired: number;
+  connected: { outlook: string[]; github: boolean; discord: boolean; push: boolean };
+}
+
+/** A starter intern from orchestrator/templates (GET /templates). */
+export interface InternTemplate {
+  id: string;
+  summary: string;
+  /** position in the picker, lowest first */
+  order: number;
+  name: string;
+  role: string;
+  icon: string;
+  tools: string[];
+  triggers: { mail_push?: boolean; cron?: string; mentions?: boolean; meeting_brief?: boolean };
+  required_capabilities: CapabilityRequirement[];
+  /** what has to be connected first */
+  needs: ("outlook" | "github")[];
+  /** this install already has everything in `needs` */
+  ready: boolean;
+}
+
 export interface Intern {
   slug: string;
   name: string;
@@ -795,6 +826,26 @@ export class InternsApi {
       method: "POST",
       body: JSON.stringify({ role }),
     });
+  }
+
+  /** A starter intern as a ready draft (same shape as hire(); no model call, nothing written). */
+  hireFromTemplate(id: string): Promise<{ draft: InternManifest; required_capabilities: CapabilityRequirement[] }> {
+    return this.request<{ draft: InternManifest; required_capabilities: CapabilityRequirement[] }>("/hire/template", {
+      method: "POST",
+      body: JSON.stringify({ id }),
+    });
+  }
+
+  templates(): Promise<InternTemplate[]> {
+    return this.request<InternTemplate[]>("/templates");
+  }
+
+  owner(): Promise<OwnerSettings> {
+    return this.request<OwnerSettings>("/owner");
+  }
+
+  updateOwner(patch: { owner_name?: string; timezone?: string; own_domains?: string[]; setup_complete?: true }): Promise<OwnerSettings> {
+    return this.request<OwnerSettings>("/owner", { method: "PATCH", body: JSON.stringify(patch) });
   }
 
   /** Commit a (possibly edited) draft: writes the manifest and announces the intern. */

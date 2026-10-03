@@ -91,6 +91,8 @@ posted until **Publish review** is pressed.
 | `GET /cards?state=open` | list cards |
 | `POST /cards/:id/actions/:actionId` `{note?}` | resolve a card |
 | `POST /hire` `{role}` | manifest draft + missing capability requirements |
+| `GET /templates` · `POST /hire/template` `{id}` | starter interns (`templates/*.yaml`, overridable from `~/.interns/templates/`); a template as a ready draft, no model call |
+| `GET/PATCH /owner` `{owner_name?, timezone?, own_domains?, setup_complete?}` | first-run setup: who the crew works for, what's connected, whether setup is done |
 | `POST /hire/confirm` `{draft, icon, required_capabilities}` | hire + capability requests |
 | `GET /capabilities` | capability build/activation lifecycle |
 | `POST /capabilities/:id/ready` | Forge reports branch + test results; creates activation card |

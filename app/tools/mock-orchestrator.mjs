@@ -7,7 +7,8 @@
  * Set DIST=0 to go back to a bare API.
  */
 import http from "node:http";
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { installFeatures } from "./mock-features.mjs";
@@ -17,6 +18,43 @@ const TOKEN = "test-token-abc";
 const PORT = Number(process.env.PORT ?? 7811);
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+/** MOCK_FRESH=1 behaves like a brand-new install: setup not done, nobody hired. */
+const owner = {
+  owner_name: process.env.MOCK_FRESH ? "Boss" : "Sam",
+  timezone: "Europe/London",
+  timezone_configured: !process.env.MOCK_FRESH,
+  own_domains: process.env.MOCK_FRESH ? [] : ["northwind.example"],
+  setup_complete: !process.env.MOCK_FRESH,
+  hired: process.env.MOCK_FRESH ? 0 : 3,
+  connected: { outlook: process.env.MOCK_FRESH ? [] : ["work"], github: false, discord: false, push: true },
+};
+
+/** The real starter templates (orchestrator/templates), read with the orchestrator's yaml package when it's installed. */
+const templates = (() => {
+  try {
+    const dir = join(ROOT, "..", "orchestrator", "templates");
+    const YAML = createRequire(join(ROOT, "..", "orchestrator", "package.json"))("yaml");
+    return readdirSync(dir)
+      .filter((f) => f.endsWith(".yaml"))
+      .sort()
+      .map((file) => {
+        const { summary, order = 100, required_capabilities = [], ...draft } = YAML.parse(readFileSync(join(dir, file), "utf8"));
+        const defaults = { persona: "", tools: [], triggers: {}, backlog: [], guardrails: { drafts_only: true, daily_token_cap: 200000 } };
+        const full = { ...defaults, ...draft };
+        const needs = [
+          ...(full.tools.some((t) => t === "mail" || t === "calendar") || full.triggers.mail_push || full.triggers.meeting_brief ? ["outlook"] : []),
+          ...(required_capabilities.some((r) => r.id === "github") ? ["github"] : []),
+        ];
+        const ready = needs.every((n) => (n === "outlook" ? owner.connected.outlook.length > 0 : owner.connected.github));
+        return { id: file.replace(/\.yaml$/, ""), summary, order, draft: full, required_capabilities, needs, ready };
+      })
+      .sort((a, b) => a.order - b.order);
+  } catch (err) {
+    console.warn(`[mock] no templates (${err.message}) — run npm ci in orchestrator/ to load them`);
+    return [];
+  }
+})();
 const DIST = process.env.DIST === "0" ? null : join(ROOT, process.env.DIST || "dist");
 const TYPES = {
   ".html": "text/html", ".js": "text/javascript", ".json": "application/json",
@@ -25,7 +63,7 @@ const TYPES = {
 };
 
 /** Routes the API owns. Note /cards is both an API route and an app route. */
-const API_PATHS = /^\/(notify|interns|tasks|cards|activity|hire|events|meta|push|github|attachments|rooms|reports|suggest|messages|pages|rules|agenda|ideas)(\/|$)/;
+const API_PATHS = /^\/(owner|templates|notify|interns|tasks|cards|activity|hire|events|meta|push|github|attachments|rooms|reports|suggest|messages|pages|rules|agenda|ideas)(\/|$)/;
 const isApiPath = (path) => API_PATHS.test(path);
 
 /** An asset as-is, else the route's own page (as the orchestrator does), else Expo's not-found page. */
@@ -610,6 +648,32 @@ const server = http.createServer((req, res) => {
       card.resolution = { via: "app", action: actionId, ...(note ? { note } : {}) };
       emit("card_state", card);
       json(200, card);
+    });
+  }
+
+  if (path === "/owner" && req.method === "GET") return json(200, owner);
+  if (path === "/owner" && req.method === "PATCH") {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    return req.on("end", () => {
+      const patch = JSON.parse(body || "{}");
+      if (patch.timezone && !/^[A-Za-z_]+\/[A-Za-z_\/]+$|^UTC$/.test(patch.timezone)) return json(400, { error: "unknown time zone" });
+      const { setup_complete, ...rest } = patch;
+      Object.assign(owner, rest, setup_complete ? { setup_complete: true } : {});
+      if (rest.timezone) owner.timezone_configured = true;
+      json(200, owner);
+    });
+  }
+  if (path === "/templates" && req.method === "GET") {
+    return json(200, templates.map(({ draft, ...t }) => ({ ...t, name: draft.name, role: draft.role, icon: draft.icon, tools: draft.tools, triggers: draft.triggers })));
+  }
+  if (path === "/hire/template" && req.method === "POST") {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    return req.on("end", () => {
+      const template = templates.find((t) => t.id === JSON.parse(body || "{}").id);
+      if (!template) return json(404, { error: "no such template" });
+      json(200, { draft: template.draft, required_capabilities: template.required_capabilities });
     });
   }
 

@@ -23,7 +23,9 @@ import {
   verifyAttachmentSig,
 } from "./attachments.js";
 import type { CapabilityService } from "./capabilities.js";
-import { calendarMailbox, internsHome, repoRoot, type Config } from "./config.js";
+import { calendarMailbox, internsHome, repoRoot, saveConfig, timeZone, type Config } from "./config.js";
+import { setProfile } from "./profile.js";
+import { listTemplates, templateReady } from "./templates.js";
 import type { Db } from "./db.js";
 import type { DiscordAdapter } from "./discord.js";
 import { INTERN_ASSIGNABLE_TOOL_NAMES, MANAGED_TOOL_NAMES, TOOL_CATALOG } from "./engine.js";
@@ -245,7 +247,7 @@ export async function startApi(deps: {
   await app.register(cors, { origin: true });
 
   /** Paths that are API (bearer-token gated); everything else is the static app shell. */
-  const API_PREFIXES = ["/interns", "/tasks", "/cards", "/activity", "/hire", "/events", "/meta", "/push", "/capabilities", "/github", "/webhooks", "/attachments", "/rooms", "/reports", "/suggest", "/messages", "/pages", "/rules", "/agenda", "/ideas", "/notify"];
+  const API_PREFIXES = ["/interns", "/tasks", "/cards", "/activity", "/hire", "/events", "/meta", "/push", "/capabilities", "/github", "/webhooks", "/attachments", "/rooms", "/reports", "/suggest", "/messages", "/pages", "/rules", "/agenda", "/ideas", "/notify", "/owner", "/templates"];
   /** A thread key is an intern slug, a live room id, or the coordinator's front desk. */
   const threadExists = (key: string) => key === "coordinator" || Boolean(registry.get(key)) || Boolean(db.getRoom(key)?.archived_at === null);
   const isApiPath = (url: string) => API_PREFIXES.some((p) => url === p || url.startsWith(`${p}/`) || url.startsWith(`${p}?`));
@@ -1000,6 +1002,67 @@ export async function startApi(deps: {
     return { icons: ICONS, tools: INTERN_ASSIGNABLE_TOOL_NAMES };
   });
 
+  // ---- first-run setup: who the crew works for, and what is connected
+  const home = deps.home ?? internsHome();
+  const ownerView = () => {
+    const hired = registry.list().filter(({ slug }) => slug !== "forge").length;
+    return {
+      owner_name: config.owner_name,
+      timezone: timeZone(config),
+      timezone_configured: Boolean(config.timezone),
+      own_domains: config.own_domains,
+      // An install that already has a crew was set up before this screen existed.
+      setup_complete: Boolean(config.setup_completed_at) || hired > 0,
+      hired,
+      connected: {
+        outlook: config.mailboxes,
+        github: Boolean(config.github.app_id && config.github.private_key_path),
+        discord: !config.discord.dry_run && Boolean(config.discord.bot_token),
+        push: Boolean(config.push.vapid_public),
+      },
+    };
+  };
+  app.get("/owner", async () => ownerView());
+  app.patch("/owner", async (req, reply) => {
+    const zoneOk = (zone: string) => {
+      try {
+        new Intl.DateTimeFormat("en", { timeZone: zone });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const body = z
+      .object({
+        owner_name: z.string().trim().min(1).max(40).optional(),
+        timezone: z.string().refine((zone) => zone === "" || zoneOk(zone), "unknown time zone").optional(),
+        own_domains: z.array(z.string().trim().toLowerCase().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/)).max(10).optional(),
+        setup_complete: z.literal(true).optional(),
+      })
+      .strict()
+      .safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "invalid owner settings", detail: body.error.issues });
+    const { setup_complete, ...changes } = body.data;
+    Object.assign(config, changes);
+    if (setup_complete && !config.setup_completed_at) config.setup_completed_at = new Date().toISOString();
+    saveConfig(config, home);
+    setProfile(config);
+    return ownerView();
+  });
+
+  // ---- starter interns (orchestrator/templates, ~/.interns/templates)
+  app.get("/templates", async () =>
+    listTemplates(home).map(({ draft, ...template }) => ({
+      ...template,
+      name: draft.name,
+      role: draft.role,
+      icon: draft.icon,
+      tools: draft.tools,
+      triggers: draft.triggers,
+      ready: templateReady({ draft, ...template }, config),
+    })),
+  );
+
   app.get<{ Querystring: { state?: string } }>("/cards", async (req, reply) => {
     if (req.query.state) {
       const state = CardStateSchema.safeParse(req.query.state);
@@ -1307,6 +1370,15 @@ export async function startApi(deps: {
     const body = z.object({ role: z.string().min(3) }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "role required" });
     return hire(body.data.role, takenNames({ db, registry }));
+  });
+
+  // A template is a finished draft: same candidate shape as POST /hire, no model call.
+  app.post("/hire/template", async (req, reply) => {
+    const body = z.object({ id: z.string().min(1) }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "template id required" });
+    const template = listTemplates(home).find((t) => t.id === body.data.id);
+    if (!template) return reply.code(404).send({ error: "no such template" });
+    return { draft: template.draft, required_capabilities: template.required_capabilities };
   });
 
   app.post("/hire/confirm", async (req, reply) => {

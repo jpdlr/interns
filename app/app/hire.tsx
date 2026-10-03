@@ -5,7 +5,9 @@
  *
  * POST /hire drafts and writes nothing; POST /hire/confirm is the one that
  * creates the intern on disk and announces it, so it only fires from the Hire
- * button on a draft JP has actually seen.
+ * button on a draft JP has actually seen. A starter template (POST
+ * /hire/template, or ?template=<id> from setup) skips the model call and
+ * lands on the same editable candidate.
  */
 import { describeCron } from "../src/schedule";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
@@ -28,6 +30,7 @@ import { Flash, GrowingInput } from "../src/ui/GrowingInput";
 import { InternFace, resolveFaceId } from "../src/ui/InternFace";
 import { EmptyState, ErrorNote, Screen } from "../src/ui/Screen";
 import { Text } from "../src/ui/Text";
+import { TemplatePicker, useTemplates } from "../src/ui/TemplatePicker";
 import { ThinkingIndicator } from "../src/ui/ThinkingIndicator";
 
 type Phase = "prompt" | "thinking" | "candidate";
@@ -56,7 +59,9 @@ export default function HireScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const { role: roleParam } = useLocalSearchParams<{ role?: string }>();
+  const { role: roleParam, template: templateParam } = useLocalSearchParams<{ role?: string; template?: string }>();
+  const { templates } = useTemplates();
+  const [openingTemplate, setOpeningTemplate] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("prompt");
   const [roughRole, setRoughRole] = useState(typeof roleParam === "string" ? roleParam : "");
   const [draft, setDraft] = useState<InternManifest | null>(null);
@@ -82,16 +87,8 @@ export default function HireScreen() {
     return () => clearInterval(timer);
   }, [phase]);
 
-  const runHire = useCallback(async () => {
-    const role = roughRole.trim();
-    if (role.length < 3) {
-      setError("Tell me a little more than that.");
-      return;
-    }
-    setError(null);
-    setPhase("thinking");
-    try {
-      const { draft: next, required_capabilities } = await api.hire(role);
+  const showCandidate = useCallback(
+    ({ draft: next, required_capabilities }: { draft: InternManifest; required_capabilities?: CapabilityRequirement[] }) => {
       nameCarry.reset();
       setRenameNote(null);
       setOpen(null);
@@ -101,19 +98,53 @@ export default function HireScreen() {
       // straight away so the candidate has a character to react to.
       setIcon(next.icon && next.icon !== "default" ? next.icon : resolveFaceId(undefined, next.name));
       setPhase("candidate");
+    },
+    [nameCarry],
+  );
+
+  const runHire = useCallback(async () => {
+    const role = roughRole.trim();
+    if (role.length < 3) {
+      setError("Tell me a little more than that.");
+      return;
+    }
+    setError(null);
+    setPhase("thinking");
+    try {
+      showCandidate(await api.hire(role));
     } catch (e) {
       setError(e);
       setPhase("prompt");
     }
-  }, [api, nameCarry, roughRole]);
+  }, [api, roughRole, showCandidate]);
+
+  const openTemplate = useCallback(
+    async (id: string) => {
+      setError(null);
+      setOpeningTemplate(id);
+      try {
+        showCandidate(await api.hireFromTemplate(id));
+      } catch (e) {
+        setError(e);
+      } finally {
+        setOpeningTemplate(null);
+      }
+    },
+    [api, showCandidate],
+  );
 
   // Arriving from a coordinator suggestion: the role is prefilled, so draft immediately.
   const autoStarted = useRef(false);
   useEffect(() => {
-    if (autoStarted.current || !configured || typeof roleParam !== "string" || roleParam.trim().length < 3) return;
-    autoStarted.current = true;
-    void runHire();
-  }, [configured, roleParam, runHire]);
+    if (autoStarted.current || !configured) return;
+    if (typeof templateParam === "string" && templateParam) {
+      autoStarted.current = true;
+      void openTemplate(templateParam);
+    } else if (typeof roleParam === "string" && roleParam.trim().length >= 3) {
+      autoStarted.current = true;
+      void runHire();
+    }
+  }, [configured, openTemplate, roleParam, runHire, templateParam]);
 
   const nameError = draft ? nameConflict(draft.name, members) : null;
 
@@ -207,6 +238,12 @@ export default function HireScreen() {
                   disabled={roughRole.trim().length < 3}
                   onPress={() => void runHire()}
                 />
+                {templates.length ? (
+                  <View style={styles.templates}>
+                    <Text variant="label">Or start from a template</Text>
+                    <TemplatePicker templates={templates} busyId={openingTemplate} onPick={(t) => void openTemplate(t.id)} />
+                  </View>
+                ) : null}
               </View>
             ) : null}
 
@@ -494,5 +531,6 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
   examples: { gap: space.sm, alignItems: "flex-start" },
+  templates: { gap: space.sm, marginTop: space.md },
   actions: { gap: space.sm, marginTop: space.sm },
 });

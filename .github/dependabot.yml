@@ -1,0 +1,36 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /orchestrator
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /app
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    # Expo pins a matching set of React Native packages; move them together with `npx expo install --fix`.
+    ignore:
+      - dependency-name: "expo*"
+        update-types: [version-update:semver-major]
+      - dependency-name: "react-native*"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "@expo/*"
+        update-types: [version-update:semver-major]
+      - dependency-name: "react"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "react-dom"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

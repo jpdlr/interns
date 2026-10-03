@@ -873,6 +873,48 @@ try {
     ctrl.abort();
     await pump;
   });
+
+  await check("templates: every starter is a valid manifest and hires without a model call", async () => {
+    const list = (await api("/templates")).body as { id: string; name: string; needs: string[]; ready: boolean }[];
+    for (const id of ["inbox-assistant", "meeting-briefer", "researcher", "code-reviewer", "ops-watchdog", "writer", "chief-of-staff"]) {
+      assert.ok(list.some((t) => t.id === id), `template ${id} is listed`);
+    }
+    const reviewer = list.find((t) => t.id === "code-reviewer")!;
+    assert.deepEqual(reviewer.needs, ["github"]);
+    assert.equal(reviewer.ready, false, "no GitHub App in the test config");
+    assert.deepEqual(list.find((t) => t.id === "inbox-assistant")!.needs, ["outlook"]);
+    const candidate = (await api("/hire/template", { method: "POST", body: { id: "researcher" } })).body;
+    assert.equal(candidate.draft.name, "Iris");
+    assert.deepEqual(candidate.required_capabilities, []);
+    assert.equal((await api("/hire/template", { method: "POST", body: { id: "nope" } })).status, 404);
+    const github = (await api("/hire/template", { method: "POST", body: { id: "code-reviewer" } })).body;
+    assert.deepEqual(github.required_capabilities.map((r: { id: string }) => r.id), ["github"]);
+  });
+
+  await check("templates: a local ~/.interns/templates file overrides the repo one", async () => {
+    fs.mkdirSync(path.join(home, "templates"), { recursive: true });
+    fs.writeFileSync(path.join(home, "templates", "researcher.yaml"), "summary: Local\nname: Quinn\nrole: Researcher\nsystem_prompt: Research.\n");
+    const list = (await api("/templates")).body as { id: string; name: string; summary: string }[];
+    assert.equal(list.filter((t) => t.id === "researcher").length, 1);
+    assert.equal(list.find((t) => t.id === "researcher")!.name, "Quinn");
+    fs.rmSync(path.join(home, "templates"), { recursive: true, force: true });
+  });
+
+  await check("owner: setup saves name, zone and domains; bad input is refused", async () => {
+    const before = (await api("/owner")).body;
+    assert.equal(before.setup_complete, true, "a crew already exists here");
+    assert.equal((await api("/owner", { method: "PATCH", body: { timezone: "Mars/Olympus" } })).status, 400);
+    assert.equal((await api("/owner", { method: "PATCH", body: { colour: "red" } })).status, 400);
+    const saved = (await api("/owner", { method: "PATCH", body: { owner_name: "Sam", timezone: "Europe/London", own_domains: ["Example.com"], setup_complete: true } })).body;
+    assert.equal(saved.owner_name, "Sam");
+    assert.equal(saved.timezone, "Europe/London");
+    assert.deepEqual(saved.own_domains, ["example.com"]);
+    const onDisk = JSON.parse(fs.readFileSync(path.join(home, "config.json"), "utf8"));
+    assert.equal(onDisk.owner_name, "Sam");
+    assert.ok(onDisk.setup_completed_at);
+    assert.equal((await api("/owner", { auth: false })).status, 401);
+    setProfile({ owner_name: "Boss", timezone: "" });
+  });
 } finally {
   await app.close();
   db.close();

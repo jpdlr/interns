@@ -94,6 +94,7 @@ function AppNavigation() {
               <Stack.Screen name="(tabs)" options={{ headerShown: false, title: "Crew" }} />
               <Stack.Screen name="chat/[slug]" options={{ title: "" }} />
               <Stack.Screen name="hire" options={{ title: "Hire an intern" }} />
+              <Stack.Screen name="setup" options={{ headerShown: false, title: "Setup" }} />
               <Stack.Screen name="inbox" options={{ headerShown: false }} />
               <Stack.Screen name="intern/[slug]/index" options={{ title: "" }} />
               <Stack.Screen name="intern/[slug]/edit" options={{ title: "" }} />
