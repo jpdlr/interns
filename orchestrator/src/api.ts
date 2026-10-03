@@ -9,6 +9,7 @@ import { createReadStream, existsSync } from "node:fs";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { notFoundPage, resolvePage } from "./appshell.js";
+import { registerConnectorRoutes, unknownMailboxes, type ConnectorService } from "./connectors.js";
 import { z } from "zod";
 import type { ApprovalService } from "./approvals.js";
 import {
@@ -154,7 +155,10 @@ function manifestResponse(slug: string, manifest: InternManifest, db: Db) {
       // on unless switched off: other interns' @mentions wake them (orchestrator.ts takesMentions)
       mentions: manifest.triggers.mentions !== false,
       mail_push: manifest.triggers.mail_push ?? false,
+      meeting_brief: manifest.triggers.meeting_brief ?? false,
     },
+    /** Outlook mailboxes this intern may use; null = every connected one (mailboxes.ts) */
+    mailboxes: manifest.mailboxes ?? null,
     backlog: manifest.backlog,
     guardrails: {
       drafts_only: manifest.guardrails.drafts_only,
@@ -192,6 +196,7 @@ const ManifestPatchSchema = z
     triggers: z
       .object({
         mail_push: z.boolean().optional(),
+        meeting_brief: z.boolean().optional(),
         // null clears a previously-set cron; omitted leaves it untouched
         cron: z.string().nullable().optional(),
         mentions: z.boolean().optional(),
@@ -206,6 +211,8 @@ const ManifestPatchSchema = z
       .optional(),
     paused: z.boolean().optional(),
     notify: NotifyLevelSchema.optional(),
+    // null lifts a limit (every connected mailbox again)
+    mailboxes: z.array(z.string()).nullable().optional(),
   })
   .strict();
 
@@ -227,6 +234,8 @@ export async function startApi(deps: {
   calendar?: CalendarSource;
   /** idea tagging call — Haiku by default; tests inject a fake */
   tagFn?: TagFn;
+  /** Connectors (Outlook sign-in, GitHub App): its routes live in connectors.ts */
+  connectors?: ConnectorService;
 }): Promise<FastifyInstance> {
   const { db, registry, bus, config, discord, push, approvals, capabilities, github, orchestrator } = deps;
   const calendar = deps.calendar ?? cachedCalendar(calendarMailbox(config));
@@ -247,7 +256,7 @@ export async function startApi(deps: {
   await app.register(cors, { origin: true });
 
   /** Paths that are API (bearer-token gated); everything else is the static app shell. */
-  const API_PREFIXES = ["/interns", "/tasks", "/cards", "/activity", "/hire", "/events", "/meta", "/push", "/capabilities", "/github", "/webhooks", "/attachments", "/rooms", "/reports", "/suggest", "/messages", "/pages", "/rules", "/agenda", "/ideas", "/notify", "/owner", "/templates"];
+  const API_PREFIXES = ["/interns", "/tasks", "/cards", "/activity", "/hire", "/events", "/meta", "/push", "/capabilities", "/github", "/webhooks", "/attachments", "/rooms", "/reports", "/suggest", "/messages", "/pages", "/rules", "/agenda", "/ideas", "/notify", "/owner", "/templates", "/connectors"];
   /** A thread key is an intern slug, a live room id, or the coordinator's front desk. */
   const threadExists = (key: string) => key === "coordinator" || Boolean(registry.get(key)) || Boolean(db.getRoom(key)?.archived_at === null);
   const isApiPath = (url: string) => API_PREFIXES.some((p) => url === p || url.startsWith(`${p}/`) || url.startsWith(`${p}?`));
@@ -612,6 +621,10 @@ export async function startApi(deps: {
     if (!body.success) return reply.code(400).send({ error: "invalid patch", detail: body.error.issues });
     const patch = body.data;
 
+    if (patch.mailboxes) {
+      const unknown = unknownMailboxes(config, patch.mailboxes);
+      if (unknown.length) return reply.code(400).send({ error: "unknown mailbox(es)", detail: unknown, valid: config.mailboxes });
+    }
     if (patch.tools) {
       const invalid = patch.tools.filter((t) => !(t in TOOL_CATALOG));
       if (invalid.length) {
@@ -648,6 +661,7 @@ export async function startApi(deps: {
     if (patch.triggers) {
       if (patch.triggers.mail_push !== undefined) triggers.mail_push = patch.triggers.mail_push;
       if (patch.triggers.mentions !== undefined) triggers.mentions = patch.triggers.mentions;
+      if (patch.triggers.meeting_brief !== undefined) triggers.meeting_brief = patch.triggers.meeting_brief;
       if ("cron" in patch.triggers) {
         if (patch.triggers.cron === null) delete triggers.cron;
         else if (patch.triggers.cron !== undefined) triggers.cron = patch.triggers.cron;
@@ -660,6 +674,7 @@ export async function startApi(deps: {
       triggers,
       guardrails: { ...existing.guardrails, ...(patch.guardrails ?? {}) },
     };
+    if (patch.mailboxes === null) delete (merged as { mailboxes?: unknown }).mailboxes; // every mailbox again
     const parsed = InternManifestSchema.safeParse(merged);
     if (!parsed.success) return reply.code(400).send({ error: "invalid manifest", detail: parsed.error.issues });
     const manifest = parsed.data;
@@ -998,6 +1013,8 @@ export async function startApi(deps: {
   });
 
   // Icon + tool catalogs the app's pickers render from, so they never drift from the backend's source of truth.
+  if (deps.connectors) registerConnectorRoutes(app, deps.connectors);
+
   app.get("/meta", async () => {
     return { icons: ICONS, tools: INTERN_ASSIGNABLE_TOOL_NAMES };
   });

@@ -112,6 +112,21 @@ let calendarEvents: CalEvent[] = [];
 let calendarFails = false;
 const tagged: string[] = [];
 const discord = new DiscordAdapter(db, registry, bus, config);
+const { ConnectorService } = await import("../src/connectors.js");
+const connectorService = new ConnectorService({
+  db,
+  registry,
+  config,
+  home,
+  github: {
+    configured: false,
+    getApp: async () => { throw new Error("no app"); },
+    convertManifest: async () => { throw new Error("no app"); },
+    accountType: async () => "User" as const,
+    listInstallations: async () => [],
+    resetTokens: () => {},
+  },
+});
 const app = await startApi({
   db,
   registry,
@@ -123,6 +138,7 @@ const app = await startApi({
   capabilities: new CapabilityService(db, registry, config, home),
   github: {} as never,
   orchestrator: orch,
+  connectors: connectorService,
   home,
   calendar: async () => {
     if (calendarFails) throw new Error("graph-cal down");
@@ -851,6 +867,29 @@ try {
     assert.deepEqual(ok.body, { summary_times: ["08:30", "17:30"], quiet: { enabled: true, from: "21:00", to: "07:00" } });
     assert.deepEqual((await api("/notify/settings")).body, ok.body);
     assert.equal((await api("/notify/settings", { auth: false })).status, 401);
+  });
+
+  await check("connectors: token-gated API; GitHub's browser return is not; manifest mailboxes and meeting briefs", async () => {
+    assert.equal((await api("/connectors", { auth: false })).status, 401);
+    const overview = await api("/connectors");
+    assert.equal(overview.status, 200, JSON.stringify(overview.body));
+    assert.equal(overview.body.github.connected, false);
+    const back = await fetch(`${base}/oauth/github/installed`, { redirect: "manual" });
+    assert.equal(back.status, 302, "a browser navigation from github.com, no bearer token");
+    // that sync saved config.json from memory (port 0 here); the CLIs need the real port back
+    fs.writeFileSync(path.join(home, "config.json"), JSON.stringify({ ...config, port }, null, 2), { mode: 0o600 });
+
+    config.mailboxes.splice(0, config.mailboxes.length, "work");
+    const bad = await api("/interns/tessa/manifest", { method: "PATCH", body: { mailboxes: ["nope"] } });
+    assert.equal(bad.status, 400);
+    assert.deepEqual(bad.body.valid, ["work"]);
+    assert.deepEqual((await api("/interns/tessa/manifest", { method: "PATCH", body: { mailboxes: ["work"] } })).body.mailboxes, ["work"]);
+    assert.equal((await api("/interns/tessa/manifest", { method: "PATCH", body: { mailboxes: null } })).body.mailboxes, null, "null lifts the limit");
+    assert.equal(registry.get("tessa")!.mailboxes, undefined);
+    const briefs = await api("/interns/tessa/manifest", { method: "PATCH", body: { triggers: { meeting_brief: true } } });
+    assert.equal(briefs.body.triggers.meeting_brief, true);
+    assert.equal(briefs.body.triggers.mentions, true, "other triggers untouched");
+    config.mailboxes.splice(0);
   });
 
   await check("SSE streams page, rule and agenda events", async () => {
