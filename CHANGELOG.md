@@ -6,6 +6,13 @@ and versions follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Photos sync from Google Drive.** Connect Google Drive on the Google Photos screen and
+  photos keep arriving on their own: a Google Takeout export of Google Photos delivered to
+  Drive (once, or every two months) is found, downloaded and imported, and so is anything saved
+  into the "Interns Photos" folder. Only photos taken from the start date you pick are kept;
+  screenshots (optional), videos (optional, as a still) and duplicates are skipped; HEIC is
+  converted. It checks every 6 hours, or on Sync now. `tools/photo-import` does the work;
+  pillow-heif joins `tools/requirements.txt`.
 - **Moodboards: a page of image cards.** Paste a link or an image into the board (or tap +
   to add photos) and it lands as a card; links get their preview image fetched and kept, with
   the post's caption and account (Instagram's image links expire, so a copy is stored with the

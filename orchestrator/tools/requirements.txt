@@ -1,2 +1,3 @@
 msal>=1.28,<2
 Pillow>=10
+pillow-heif>=0.18

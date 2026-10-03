@@ -29,6 +29,8 @@ import type { Registry } from "./registry.js";
 import type { InternManifest } from "./types.js";
 
 export const PICKER_SCOPE = "https://www.googleapis.com/auth/photospicker.mediaitems.readonly";
+/** Drive photo sync (drivesync.ts): read Takeout exports and the photos folder; create that folder. */
+export const DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly", "https://www.googleapis.com/auth/drive.file"];
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const PICKER = "https://photospicker.googleapis.com/v1";
@@ -52,6 +54,8 @@ export interface GoogleConnection {
   connected_at?: string;
   /** set when Google refused the refresh token (testing-mode tokens last a week) */
   needs_reconnect?: boolean;
+  /** what the owner granted at the last sign-in */
+  scopes?: string[];
 }
 
 export interface LibraryItem {
@@ -66,6 +70,8 @@ export interface LibraryItem {
   camera: string | null;
   imported_at: string;
   batch: string;
+  /** content hash of the original (Drive imports), so a photo is never imported twice */
+  sha?: string;
 }
 
 export interface PickSession {
@@ -171,6 +177,7 @@ export class GooglePhotos {
       needs_reconnect: Boolean(c?.needs_reconnect),
       connected_at: c?.connected_at ?? null,
       library: { count: items.length, photos: items.filter((i) => i.type === "photo").length, last_import: last },
+      drive: this.driveGranted(),
       interns: this.registry.list().map(({ slug, manifest }) => ({ slug, name: manifest.name, enabled: usesPhotos(manifest) })),
       sessions: [...this.sessions.values()].filter((s) => s.state === "waiting" || s.state === "importing"),
     };
@@ -187,8 +194,14 @@ export class GooglePhotos {
     return this.status();
   }
 
-  /** The Google sign-in URL; the browser comes back to <origin>/oauth/google/callback. */
-  authUrl(origin: string): string {
+  /** Whether the last sign-in included Drive (the photo sync). */
+  driveGranted(): boolean {
+    const scopes = readGoogle(this.home)?.scopes ?? [];
+    return DRIVE_SCOPES.every((s) => scopes.includes(s));
+  }
+
+  /** The Google sign-in URL; the browser comes back to <origin>/oauth/google/callback. Drive is kept once granted. */
+  authUrl(origin: string, opts: { drive?: boolean } = {}): string {
     const c = readGoogle(this.home);
     if (!c?.client_id) throw new PhotosError(409, "Add your Google OAuth client first.");
     let base: URL;
@@ -205,7 +218,7 @@ export class GooglePhotos {
       client_id: c.client_id,
       redirect_uri: `${base.origin}/oauth/google/callback`,
       response_type: "code",
-      scope: PICKER_SCOPE,
+      scope: [PICKER_SCOPE, ...(opts.drive || this.driveGranted() ? DRIVE_SCOPES : [])].join(" "),
       access_type: "offline",
       prompt: "consent",
       include_granted_scopes: "false",
@@ -231,17 +244,18 @@ export class GooglePhotos {
       expires_at: Date.now() + (tokens.expires_in ?? 3600) * 1000,
       connected_at: new Date().toISOString(),
       needs_reconnect: false,
+      scopes: (tokens.scope ?? PICKER_SCOPE).split(/\s+/).filter(Boolean),
     });
     return `${pending.origin}/connectors/google-photos?connected=1`;
   }
 
-  private async token(params: Record<string, string>, c: GoogleConnection): Promise<{ access_token: string; refresh_token?: string; expires_in?: number }> {
+  private async token(params: Record<string, string>, c: GoogleConnection): Promise<{ access_token: string; refresh_token?: string; expires_in?: number; scope?: string }> {
     const res = await this.fetch(TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ ...params, client_id: c.client_id, client_secret: c.client_secret }).toString(),
     });
-    const body = (await res.json()) as { access_token?: string; refresh_token?: string; expires_in?: number; error?: string; error_description?: string };
+    const body = (await res.json()) as { access_token?: string; refresh_token?: string; expires_in?: number; scope?: string; error?: string; error_description?: string };
     if (!res.ok || !body.access_token) {
       if (body.error === "invalid_grant" && params.grant_type === "refresh_token") {
         writeGoogle(this.home, { ...c, needs_reconnect: true });
@@ -249,10 +263,10 @@ export class GooglePhotos {
       }
       throw new PhotosError(502, `Google sign-in failed: ${body.error_description ?? body.error ?? res.status}`);
     }
-    return body as { access_token: string; refresh_token?: string; expires_in?: number };
+    return body as { access_token: string; refresh_token?: string; expires_in?: number; scope?: string };
   }
 
-  private async accessToken(): Promise<string> {
+  async accessToken(): Promise<string> {
     const c = readGoogle(this.home);
     if (!c?.refresh_token || c.needs_reconnect) throw new PhotosError(409, "Connect Google Photos first.");
     if (c.access_token && (c.expires_at ?? 0) > Date.now() + 60_000) return c.access_token;
@@ -393,6 +407,15 @@ export class GooglePhotos {
     writeLibrary(this.home, library);
   }
 
+  /** Add imported photos (drivesync.ts); ids already there are skipped. Returns how many were new. */
+  addToLibrary(items: LibraryItem[]): number {
+    const library = readLibrary(this.home);
+    const known = new Set(library.map((i) => i.id));
+    const fresh = items.filter((i) => !known.has(i.id));
+    if (fresh.length) writeLibrary(this.home, [...library, ...fresh]);
+    return fresh.length;
+  }
+
   /** Who may use the library (the `photos` tool). */
   setInterns(interns: Record<string, boolean>) {
     for (const [slug, on] of Object.entries(interns)) {
@@ -429,9 +452,9 @@ export function registerPhotosRoutes(app: FastifyInstance, photos: GooglePhotos)
     return run(reply, () => photos.setApp(body.data));
   });
   app.post("/connectors/google-photos/connect", async (req, reply) => {
-    const body = z.object({ origin: z.string() }).safeParse(req.body);
+    const body = z.object({ origin: z.string(), drive: z.boolean().optional() }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "origin required" });
-    return run(reply, () => ({ url: photos.authUrl(body.data.origin) }));
+    return run(reply, () => ({ url: photos.authUrl(body.data.origin, { drive: body.data.drive }) }));
   });
   app.post("/connectors/google-photos/sessions", async (_req, reply) => run(reply, () => photos.startPick()));
   app.get<{ Params: { id: string } }>("/connectors/google-photos/sessions/:id", async (req, reply) => run(reply, () => photos.pickStatus(req.params.id)));

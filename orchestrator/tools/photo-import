@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+"""photo-import — turn Google Takeout zips or loose image files into library photos.
+
+Used by the Google Drive photo sync (src/drivesync.ts); not an intern tool.
+
+  photo-import --out DIR --from YYYY-MM-DD [--skip-screenshots] [--videos] [--known known.txt]
+               (--zip takeout.zip | --files files.json)
+
+--files is a JSON list of {"path", "name", "taken"?} (Drive folder files).
+For each photo taken on or after --from it writes DIR/img/<id>.jpg (2048px)
+and DIR/thumb/<id>.jpg (512px), and prints one JSON line:
+  {"id", "file", "thumb", "type", "filename", "created_at", "width", "height", "camera", "sha"}
+Skipped items are counted in a final {"done": true, "imported", "skipped": {...}} line.
+
+The id is the content hash, so the same photo from two exports (or from the
+picker and Takeout) is only imported once; --known lists hashes to skip.
+HEIC needs pillow-heif; videos (--videos) become a still frame via ffmpeg.
+"""
+import argparse, datetime as dt, hashlib, io, json, os, re, subprocess, sys, tempfile, zipfile
+
+IMAGE_EXT = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"}
+VIDEO_EXT = {".mp4", ".mov", ".m4v"}
+SCREENSHOT = re.compile(r"screenshot|screen shot|screen_shot|scrnsht", re.I)
+YEAR_DIR = re.compile(r"Photos from (\d{4})")
+
+try:
+    from PIL import Image, ImageOps, ExifTags
+except ImportError:  # pragma: no cover
+    print(json.dumps({"error": "Pillow isn't installed (pip install -r orchestrator/tools/requirements.txt)"}))
+    sys.exit(1)
+try:
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+    HEIF = True
+except ImportError:
+    HEIF = False
+
+
+def exif_info(im):
+    """(taken datetime or None, camera or None) from EXIF."""
+    try:
+        exif = im.getexif()
+    except Exception:
+        return None, None
+    tags = {ExifTags.TAGS.get(k, k): v for k, v in exif.items()}
+    try:
+        sub = exif.get_ifd(0x8769)
+        tags.update({ExifTags.TAGS.get(k, k): v for k, v in sub.items()})
+    except Exception:
+        pass
+    taken = None
+    raw = tags.get("DateTimeOriginal") or tags.get("DateTime")
+    if isinstance(raw, str):
+        try:
+            taken = dt.datetime.strptime(raw.strip()[:19], "%Y:%m:%d %H:%M:%S").replace(tzinfo=dt.timezone.utc)
+        except ValueError:
+            pass
+    camera = " ".join(str(tags.get(k, "")).strip() for k in ("Make", "Model")).strip() or None
+    return taken, camera
+
+
+def is_screenshot(name, im):
+    if SCREENSHOT.search(name):
+        return True
+    # iPhone screenshots: PNG at the screen's pixel size, no camera in the EXIF
+    if name.lower().endswith(".png"):
+        _, camera = exif_info(im)
+        return camera is None
+    return False
+
+
+def save(im, out, ident):
+    im = ImageOps.exif_transpose(im).convert("RGB")
+    big = im.copy()
+    big.thumbnail((2048, 2048))
+    big.save(os.path.join(out, "img", f"{ident}.jpg"), "JPEG", quality=86)
+    small = im.copy()
+    small.thumbnail((512, 512))
+    small.save(os.path.join(out, "thumb", f"{ident}.jpg"), "JPEG", quality=80)
+    return im.width, im.height
+
+
+def video_still(data, suffix):
+    with tempfile.TemporaryDirectory(dir=os.environ.get("PHOTO_IMPORT_TMP")) as tmp:
+        src = os.path.join(tmp, f"v{suffix}")
+        dst = os.path.join(tmp, "still.jpg")
+        with open(src, "wb") as f:
+            f.write(data)
+        r = subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-ss", "1", "-i", src, "-frames:v", "1", dst], capture_output=True)
+        if r.returncode != 0 or not os.path.exists(dst):
+            r = subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", src, "-frames:v", "1", dst], capture_output=True)
+        if not os.path.exists(dst):
+            return None
+        with open(dst, "rb") as f:
+            return f.read()
+
+
+class Importer:
+    def __init__(self, args):
+        self.out = args.out
+        self.since = dt.datetime.strptime(args.since, "%Y-%m-%d").replace(tzinfo=dt.timezone.utc)
+        self.skip_screenshots = args.skip_screenshots
+        self.videos = args.videos
+        self.known = set()
+        if args.known and os.path.exists(args.known):
+            with open(args.known) as f:
+                self.known = {line.strip() for line in f if line.strip()}
+        self.skipped = {}
+        self.imported = 0
+        os.makedirs(os.path.join(self.out, "img"), exist_ok=True)
+        os.makedirs(os.path.join(self.out, "thumb"), exist_ok=True)
+
+    def skip(self, why):
+        self.skipped[why] = self.skipped.get(why, 0) + 1
+
+    def add(self, name, data, taken_hint=None, folder_year=None):
+        ext = os.path.splitext(name)[1].lower()
+        is_video = ext in VIDEO_EXT
+        if is_video and not self.videos:
+            return self.skip("video")
+        if not is_video and ext not in IMAGE_EXT:
+            return self.skip("other file")
+        if ext in (".heic", ".heif") and not HEIF:
+            return self.skip("heic (pillow-heif missing)")
+        # quick date check before decoding: the folder year or the hint
+        if taken_hint and taken_hint < self.since:
+            return self.skip("before the start date")
+        if not taken_hint and folder_year and folder_year < self.since.year:
+            return self.skip("before the start date")
+        sha = hashlib.sha256(data).hexdigest()
+        if sha in self.known:
+            return self.skip("already in the library")
+        try:
+            if is_video:
+                still = video_still(data, ext)
+                if not still:
+                    return self.skip("unreadable")
+                im = Image.open(io.BytesIO(still))
+            else:
+                im = Image.open(io.BytesIO(data))
+            im.load()
+        except Exception:
+            return self.skip("unreadable")
+        exif_taken, camera = exif_info(im)
+        taken = taken_hint or exif_taken
+        if taken and taken < self.since:
+            return self.skip("before the start date")
+        if not is_video and self.skip_screenshots and is_screenshot(name, im):
+            return self.skip("screenshot")
+        ident = f"t_{sha[:24]}"
+        width, height = save(im, self.out, ident)
+        self.known.add(sha)
+        self.imported += 1
+        print(json.dumps({
+            "id": ident, "file": f"img/{ident}.jpg", "thumb": f"thumb/{ident}.jpg", "type": "video" if is_video else "photo",
+            "filename": os.path.basename(name), "created_at": taken.isoformat().replace("+00:00", "Z") if taken else None,
+            "width": width, "height": height, "camera": camera, "sha": sha,
+        }), flush=True)
+
+    def from_zip(self, path):
+        with zipfile.ZipFile(path) as z:
+            names = z.namelist()
+            sidecars = {n for n in names if n.endswith(".json")}
+            for n in names:
+                if n.endswith("/") or n.endswith(".json"):
+                    continue
+                taken = None
+                # Takeout writes <name>.json or <name>.supplemental-metadata.json (sometimes cut short)
+                for cand in (f"{n}.json", f"{n}.supplemental-metadata.json", f"{n}.supplemental-metadat.json", f"{n}.suppl.json"):
+                    if cand in sidecars:
+                        try:
+                            meta = json.loads(z.read(cand))
+                            ts = int(meta.get("photoTakenTime", {}).get("timestamp", 0))
+                            if ts:
+                                taken = dt.datetime.fromtimestamp(ts, tz=dt.timezone.utc)
+                        except Exception:
+                            pass
+                        break
+                ext = os.path.splitext(n)[1].lower()
+                if ext in VIDEO_EXT and not self.videos:
+                    self.skip("video")
+                    continue
+                if ext not in IMAGE_EXT and ext not in VIDEO_EXT:
+                    self.skip("other file")
+                    continue
+                m = YEAR_DIR.search(n)
+                year = int(m.group(1)) if m else None
+                if (taken and taken < self.since) or (not taken and year and year < self.since.year):
+                    self.skip("before the start date")
+                    continue
+                self.add(n, z.read(n), taken, year)
+
+    def from_files(self, spec):
+        with open(spec) as f:
+            files = json.load(f)
+        for item in files:
+            taken = None
+            if item.get("taken"):
+                try:
+                    taken = dt.datetime.fromisoformat(item["taken"].replace("Z", "+00:00"))
+                    if taken.tzinfo is None:
+                        taken = taken.replace(tzinfo=dt.timezone.utc)
+                except ValueError:
+                    taken = None
+            with open(item["path"], "rb") as fh:
+                self.add(item.get("name") or os.path.basename(item["path"]), fh.read(), taken)
+
+
+def main():
+    p = argparse.ArgumentParser(prog="photo-import", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--out", required=True)
+    p.add_argument("--from", dest="since", required=True)
+    p.add_argument("--skip-screenshots", action="store_true")
+    p.add_argument("--videos", action="store_true")
+    p.add_argument("--known")
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument("--zip")
+    g.add_argument("--files")
+    args = p.parse_args()
+    imp = Importer(args)
+    try:
+        if args.zip:
+            imp.from_zip(args.zip)
+        else:
+            imp.from_files(args.files)
+    except zipfile.BadZipFile:
+        print(json.dumps({"error": "not a readable zip"}))
+        sys.exit(1)
+    print(json.dumps({"done": True, "imported": imp.imported, "skipped": imp.skipped}))
+
+
+if __name__ == "__main__":
+    main()

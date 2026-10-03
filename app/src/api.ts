@@ -433,8 +433,21 @@ export interface GooglePhotosConnector {
   needs_reconnect: boolean;
   connected_at: string | null;
   library: { count: number; photos: number; last_import: string | null };
+  /** the sign-in includes Drive (the photo sync) */
+  drive: boolean;
   interns: { slug: string; name: string; enabled: boolean }[];
   sessions: PhotoPick[];
+}
+
+/** Photos synced from Google Drive: Takeout exports and the Interns Photos folder. */
+export interface DriveSyncStatus {
+  settings: { enabled: boolean; from: string; videos: boolean; skip_screenshots: boolean; folder_name: string };
+  drive: boolean;
+  folder: { id: string; name: string; url: string } | null;
+  running: boolean;
+  progress: string | null;
+  last_run_at: string | null;
+  last_result: { imported: number; files: number; skipped: Record<string, number>; error?: string } | null;
 }
 
 export interface ConnectorsOverview {
@@ -1139,8 +1152,20 @@ export class InternsApi {
   }
 
   /** Where to send the browser to sign in with Google; it comes back to this origin. */
-  googlePhotosSignIn(origin: string): Promise<{ url: string }> {
-    return this.request("/connectors/google-photos/connect", { method: "POST", body: JSON.stringify({ origin }) });
+  googlePhotosSignIn(origin: string, opts: { drive?: boolean } = {}): Promise<{ url: string }> {
+    return this.request("/connectors/google-photos/connect", { method: "POST", body: JSON.stringify({ origin, ...opts }) });
+  }
+
+  driveSync(): Promise<DriveSyncStatus> {
+    return this.request<DriveSyncStatus>("/connectors/google-photos/sync");
+  }
+
+  updateDriveSync(patch: Partial<DriveSyncStatus["settings"]>): Promise<DriveSyncStatus> {
+    return this.request<DriveSyncStatus>("/connectors/google-photos/sync", { method: "PATCH", body: JSON.stringify(patch) });
+  }
+
+  runDriveSync(): Promise<DriveSyncStatus> {
+    return this.request<DriveSyncStatus>("/connectors/google-photos/sync/run", { method: "POST", body: "{}" });
   }
 
   startPhotoPick(): Promise<PhotoPick> {

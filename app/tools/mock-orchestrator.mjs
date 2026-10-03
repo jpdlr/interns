@@ -35,8 +35,8 @@ const owner = {
 const connectorState = {
   /** MOCK_PHOTOS=1 starts with Google Photos set up and a few photos shared */
   googlePhotos: process.env.MOCK_PHOTOS
-    ? { client_id: "123456-demo.apps.googleusercontent.com", connected: true, count: 48, last_import: new Date(Date.now() - 86_400_000).toISOString(), enabled: { milo: true }, session: null }
-    : { client_id: null, connected: false, count: 0, last_import: null, enabled: {}, session: null },
+    ? { client_id: "123456-demo.apps.googleusercontent.com", connected: true, count: 48, last_import: new Date(Date.now() - 86_400_000).toISOString(), enabled: { milo: true }, session: null, drive: false, sync: { enabled: true, from: "2023-01-01", videos: false, skip_screenshots: true, folder_name: "Interns Photos" }, syncPolls: 0, syncLast: null, syncResult: null }
+    : { client_id: null, connected: false, count: 0, last_import: null, enabled: {}, session: null, drive: false, sync: { enabled: true, from: "2023-01-01", videos: false, skip_screenshots: true, folder_name: "Interns Photos" }, syncPolls: 0, syncLast: null, syncResult: null },
   client_id: process.env.MOCK_FRESH ? null : "11111111-2222-3333-4444-555555555555",
   authority: "organizations",
   calendar: "work",
@@ -78,6 +78,7 @@ function photosView() {
     needs_reconnect: false,
     connected_at: gp.connected ? new Date().toISOString() : null,
     library: { count: gp.count, photos: gp.count, last_import: gp.last_import },
+    drive: Boolean(gp.drive),
     interns: interns.filter((i) => i.slug !== "coordinator").map((i) => ({ slug: i.slug, name: i.name, enabled: Boolean(gp.enabled[i.slug]) })),
     sessions: gp.session && ["waiting", "importing"].includes(gp.session.state) ? [gp.session] : [],
   };
@@ -101,8 +102,35 @@ function connectorRoute(req, path, json) {
   if (path === "/connectors/google-photos/connect" && req.method === "POST") {
     return void body().then((b) => {
       gp.connected = true;
+      if (b.drive) gp.drive = true;
       json(200, { url: `${b.origin}/connectors/google-photos?connected=1` });
     });
+  }
+  // Drive photo sync (orchestrator src/drivesync.ts): a run takes two polls, then reports.
+  const syncView = () => ({
+    settings: gp.sync, drive: Boolean(gp.drive),
+    folder: gp.drive ? { id: "f1", name: gp.sync.folder_name, url: "https://drive.google.com/drive/folders/f1" } : null,
+    running: gp.syncPolls > 0, progress: gp.syncPolls > 1 ? "Downloading takeout-20261003T120000Z-001.zip (12.4 GB), 1 of 3…" : gp.syncPolls === 1 ? "Importing takeout-20261003T120000Z-001.zip…" : null,
+    last_run_at: gp.syncLast, last_result: gp.syncResult,
+  });
+  if (path === "/connectors/google-photos/sync" && req.method === "GET") {
+    if (gp.syncPolls > 0 && --gp.syncPolls === 0) {
+      gp.syncLast = new Date().toISOString();
+      gp.syncResult = { imported: 1284, files: 3, skipped: { "before the start date": 5210, screenshot: 412, video: 96, "already in the library": 24 } };
+      gp.count += 1284;
+      gp.last_import = gp.syncLast;
+    }
+    return json(200, syncView());
+  }
+  if (path === "/connectors/google-photos/sync" && req.method === "PATCH") {
+    return void body().then((b) => {
+      Object.assign(gp.sync, b);
+      json(200, syncView());
+    });
+  }
+  if (path === "/connectors/google-photos/sync/run" && req.method === "POST") {
+    gp.syncPolls = 3;
+    return json(200, syncView());
   }
   if (path === "/connectors/google-photos/sessions" && req.method === "POST") {
     gp.session = { id: `s${Date.now()}`, picker_uri: "https://photos.google.com/picker/demo", state: "waiting", total: 0, imported: 0, skipped: 0, error: null, started_at: new Date().toISOString(), polls: 0 };
