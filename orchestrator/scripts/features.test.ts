@@ -875,7 +875,8 @@ try {
     assert.equal(overview.status, 200, JSON.stringify(overview.body));
     assert.equal(overview.body.github.connected, false);
     const back = await fetch(`${base}/oauth/github/installed`, { redirect: "manual" });
-    assert.equal(back.status, 302, "a browser navigation from github.com, no bearer token");
+    assert.equal(back.status, 200, "a browser navigation from github.com reaches the route without a bearer token");
+    assert.match(await back.text(), /Nothing changed here/, "but without one of our states it changes nothing");
     // that sync saved config.json from memory (port 0 here); the CLIs need the real port back
     fs.writeFileSync(path.join(home, "config.json"), JSON.stringify({ ...config, port }, null, 2), { mode: 0o600 });
 

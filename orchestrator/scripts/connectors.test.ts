@@ -257,16 +257,30 @@ try {
     const state = (globalThis as { state?: string }).state!;
     const res = await call("GET", `/oauth/github/callback?code=abc&state=${encodeURIComponent(state)}`);
     assert.equal(res.status, 302);
-    assert.equal(res.headers.location, `https://github.com/apps/interns-for-northwind/installations/new?state=${encodeURIComponent(state)}`);
+    const install = new URL(String(res.headers.location));
+    assert.equal(install.origin + install.pathname, "https://github.com/apps/interns-for-northwind/installations/new");
+    const installState = install.searchParams.get("state")!;
+    assert.ok(installState && installState !== state, "a fresh state for the install step");
+    (globalThis as { installState?: string }).installState = installState;
+    assert.equal((await call("GET", `/oauth/github/callback?code=abc&state=${encodeURIComponent(state)}`)).status, 403, "single use");
     assert.equal(config.github.app_id, "42");
     assert.equal(fs.statSync(config.github.private_key_path).mode & 0o777, 0o600);
     assert.equal(config.github.webhook_secret, "whsec");
     assert.equal((await call("GET", `/oauth/github/callback?code=abc&state=forged2`)).status, 403);
   });
 
-  await check("github: installed → installations synced, new account on, back to the app", async () => {
+  await check("github: installed → installations synced, new account on, back to the app; without our state nothing changes", async () => {
     fakeGithub.installations = [{ id: 7, account: { login: "northwind", type: "Organization" }, repository_selection: "all", suspended_at: null }];
-    const state = (globalThis as { state?: string }).state!;
+    // someone installing on github.com directly (or replaying a create-step state) changes nothing
+    const stranger = await call("GET", "/oauth/github/installed?installation_id=7&setup_action=install");
+    assert.equal(stranger.status, 200);
+    assert.match(String(stranger.body), /Nothing changed here/);
+    assert.deepEqual(config.github.installation_ids, {});
+    const wrongStep = await call("GET", `/oauth/github/installed?installation_id=7&state=${encodeURIComponent((globalThis as { state?: string }).state!)}`);
+    assert.match(String(wrongStep.body), /Nothing changed here/);
+    assert.deepEqual(config.github.repositories, []);
+
+    const state = (globalThis as { installState?: string }).installState!;
     const res = await call("GET", `/oauth/github/installed?installation_id=7&setup_action=install&state=${encodeURIComponent(state)}`);
     assert.equal(res.status, 302);
     assert.equal(res.headers.location, "https://interns.example.com/connectors/github?connected=1");
@@ -277,6 +291,12 @@ try {
     assert.equal(status.connected, true);
     assert.equal(status.app.slug, "interns-for-northwind");
     assert.deepEqual(status.installations, [{ login: "northwind", type: "Organization", all_repositories: true, suspended: false, enabled: true }]);
+    assert.match(String((await call("GET", `/oauth/github/installed?state=${encodeURIComponent(state)}`)).body), /Nothing changed here/, "used up");
+
+    // "Add an account": an authenticated call issues a fresh install link
+    const more = await call("POST", "/connectors/github/install", { origin: "https://interns.example.com" });
+    assert.match(more.body.url, /^https:\/\/github\.com\/apps\/interns-for-northwind\/installations\/new\?state=/);
+    assert.ok(!JSON.stringify(status).includes("BEGIN KEY") && !JSON.stringify(status).includes("whsec"), "no secrets in responses");
   });
 
   await check("github: accounts on/off, reviewer gets the tool, a re-sync keeps choices, disconnect cleans up", async () => {

@@ -75,7 +75,8 @@ const MAILBOX_ID = /^[a-z0-9][a-z0-9_-]*$/;
 const CLIENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Free mail providers: their domain is never "one of the owner's own". */
 const PERSONAL_DOMAINS = new Set(["outlook.com", "hotmail.com", "live.com", "msn.com", "gmail.com", "icloud.com", "yahoo.com"]);
-const GITHUB_STATE_TTL_MS = 60 * 60_000;
+/** One-time GitHub flow states live this long (creating or installing the App takes a minute or two). */
+const GITHUB_STATE_TTL_MS = 15 * 60_000;
 
 function defaultStartLogin(args: string[], env: NodeJS.ProcessEnv): LoginProcess {
   const child = spawn(path.join(TOOLS_DIR, "graph-login"), args, { env, stdio: ["ignore", "pipe", "pipe"] });
@@ -127,7 +128,8 @@ export function mailboxIdFor(label: string, taken: string[]): string {
 
 export class ConnectorService {
   private sessions = new Map<string, LoginSession & { proc?: LoginProcess }>();
-  private githubStates = new Map<string, { login: string; origin: string; expires: number }>();
+  /** state → the step it was issued for, by an authenticated API call; single use */
+  private githubStates = new Map<string, { step: "create" | "install"; origin: string; expires: number }>();
   private appCache: { at: number; app: Awaited<ReturnType<GithubClient["getApp"]>> } | null = null;
   private checks = new Map<string, { at: string; ok: boolean; unread?: number; error?: string }>();
   private readonly startLogin: StartLogin;
@@ -348,8 +350,7 @@ export class ConnectorService {
     };
     if (!appSet) return base;
     try {
-      if (!this.appCache || Date.now() - this.appCache.at > 10 * 60_000) this.appCache = { at: Date.now(), app: await github.getApp() };
-      const app = this.appCache.app;
+      const app = await this.cachedApp();
       base.app = { name: app.name, slug: app.slug, html_url: app.html_url, owner: app.owner?.login ?? null };
       const enabled = new Set(config.github.repositories.filter((r) => r.endsWith("/*")).map((r) => r.slice(0, -2).toLowerCase()));
       base.installations = (await github.listInstallations()).map((i: GithubInstallation) => ({
@@ -378,8 +379,7 @@ export class ConnectorService {
     if (origin.protocol !== "https:" && origin.protocol !== "http:") throw new ConnectorError(400, "Unknown app address.");
     const type = await this.deps.github.accountType(login);
     if (!type) throw new ConnectorError(404, `GitHub has no account called ${login}.`);
-    const state = randomBytes(24).toString("base64url");
-    this.githubStates.set(state, { login, origin: origin.origin, expires: Date.now() + GITHUB_STATE_TTL_MS });
+    const state = this.issueState("create", origin.origin);
     const base = origin.origin;
     const manifest = {
       name: `Interns for ${login}`.slice(0, 34),
@@ -401,11 +401,46 @@ export class ConnectorService {
     return { action, manifest };
   }
 
+  private issueState(step: "create" | "install", origin: string): string {
+    const now = Date.now();
+    for (const [key, value] of this.githubStates) if (value.expires < now) this.githubStates.delete(key);
+    const state = randomBytes(24).toString("base64url");
+    this.githubStates.set(state, { step, origin, expires: now + GITHUB_STATE_TTL_MS });
+    return state;
+  }
+
+  /** A browser came back from GitHub: its state must be one we issued for this step, unexpired, and it is used up. */
+  private takeState(state: string | undefined, step: "create" | "install"): { origin: string } {
+    const pending = state ? this.githubStates.get(state) : undefined;
+    if (state) this.githubStates.delete(state);
+    if (!pending || pending.step !== step || pending.expires < Date.now()) {
+      throw new ConnectorError(403, "This GitHub link has expired or was already used. Start again from Connectors in the app.");
+    }
+    return pending;
+  }
+
+  /** "Add an account or organization": a fresh install link for the App. */
+  async githubInstallUrl(origin: string): Promise<string> {
+    if (!this.deps.config.github.app_id) throw new ConnectorError(409, "Connect GitHub first.");
+    let parsed: URL;
+    try {
+      parsed = new URL(origin);
+    } catch {
+      throw new ConnectorError(400, "Unknown app address.");
+    }
+    const app = await this.cachedApp();
+    return `https://github.com/apps/${encodeURIComponent(app.slug)}/installations/new?state=${encodeURIComponent(this.issueState("install", parsed.origin))}`;
+  }
+
+  private async cachedApp() {
+    if (!this.appCache || Date.now() - this.appCache.at > 10 * 60_000) this.appCache = { at: Date.now(), app: await this.deps.github.getApp() };
+    return this.appCache.app;
+  }
+
   /** Step 2 (browser, from GitHub): store the new App, then send the browser on to install it. */
   async githubCallback(code: string, state: string): Promise<string> {
-    const pending = this.githubStates.get(state);
-    if (!pending || pending.expires < Date.now()) throw new ConnectorError(403, "This GitHub setup link has expired. Start again from Connectors in the app.");
-    this.githubStates.delete(state);
+    const pending = this.takeState(state, "create");
+    if (!code) throw new ConnectorError(400, "GitHub didn't send the App back.");
     const app = await this.deps.github.convertManifest(code);
     const { config, home } = this.deps;
     const keyFile = path.join(home, "github-app.pem");
@@ -420,16 +455,21 @@ export class ConnectorService {
     this.save();
     this.deps.github.resetTokens();
     this.appCache = null;
-    this.githubStates.set(state, { ...pending, expires: Date.now() + GITHUB_STATE_TTL_MS });
-    return `https://github.com/apps/${encodeURIComponent(app.slug)}/installations/new?state=${encodeURIComponent(state)}`;
+    const install = this.issueState("install", pending.origin);
+    return `https://github.com/apps/${encodeURIComponent(app.slug)}/installations/new?state=${encodeURIComponent(install)}`;
   }
 
-  /** Step 3 (browser, from GitHub after an install or change): sync, and turn reviews on for a new account. Returns where to send the browser. */
+  /**
+   * Step 3 (browser, from GitHub after installing): sync, and turn reviews on
+   * for the newly installed account. Only for an install the owner started
+   * here — without our state (an install made on GitHub directly, perhaps by
+   * someone else on a public App) nothing changes; "Refresh" picks it up,
+   * switched off. Returns where to send the browser.
+   */
   async githubInstalled(state: string | undefined): Promise<string> {
-    const pending = state ? this.githubStates.get(state) : undefined;
-    if (state) this.githubStates.delete(state);
+    const pending = this.takeState(state, "install");
     await this.syncGithub({ enableNew: true });
-    return `${pending?.origin ?? ""}/connectors/github?connected=1`;
+    return `${pending.origin}/connectors/github?connected=1`;
   }
 
   /** Mirror GitHub's installations into config; newly installed accounts get reviews on when `enableNew`. */
@@ -560,6 +600,11 @@ export function registerConnectorRoutes(app: FastifyInstance, connectors: Connec
     if (!body.success) return reply.code(400).send({ error: "login and origin required" });
     return run(reply, () => connectors.githubSetup(body.data));
   });
+  app.post("/connectors/github/install", async (req, reply) => {
+    const body = z.object({ origin: z.string() }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "origin required" });
+    return run(reply, async () => ({ url: await connectors.githubInstallUrl(body.data.origin) }));
+  });
   app.post("/connectors/github/sync", async (_req, reply) => run(reply, async () => (await connectors.syncGithub(), connectors.githubStatus())));
   app.patch("/connectors/github", async (req, reply) => {
     const body = z.object({ accounts: z.record(z.string(), z.boolean()).optional(), reviewer: z.string().optional() }).strict().safeParse(req.body ?? {});
@@ -586,6 +631,12 @@ export function registerConnectorRoutes(app: FastifyInstance, connectors: Connec
     try {
       return reply.redirect(await connectors.githubInstalled(req.query.state));
     } catch (err) {
+      if (err instanceof ConnectorError && err.status === 403) {
+        // e.g. an install changed on github.com directly: nothing changes here, nothing is switched on
+        return reply
+          .type("text/html")
+          .send(page("Back to the app", 'Nothing changed here. In the app, open Connectors › GitHub and tap <b>Refresh from GitHub</b> to see this installation. <a href="/connectors/github">Open Connectors</a>'));
+      }
       const { status, body } = fail(err);
       return reply.code(status).type("text/html").send(page("Couldn't finish connecting GitHub", `${String(body.error).replace(/[<>&]/g, "")} <a href="/connectors/github">Back to the app</a>`));
     }
