@@ -11,7 +11,7 @@ import { useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import { Alert, Linking, Platform, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { GooglePhotosConnector, PhotoPick } from "../../src/api";
+import type { DriveSyncStatus, GooglePhotosConnector, PhotoPick } from "../../src/api";
 import { useSettings } from "../../src/settings";
 import { radius, scaledFont, space, useAppTheme } from "../../src/theme";
 import { relativeTime } from "../../src/time";
@@ -22,7 +22,9 @@ import { copyText } from "../../src/ui/Markdown";
 import { EmptyState, ErrorNote, Loading, Screen } from "../../src/ui/Screen";
 import { Text } from "../../src/ui/Text";
 
-const PICKER_API = "https://console.cloud.google.com/apis/library/photospicker.googleapis.com";
+// One click enables both: the Photos Picker API and the Drive API (photo sync).
+const PICKER_API = "https://console.cloud.google.com/flows/enableapi?apiid=photospicker.googleapis.com,drive.googleapis.com";
+const TAKEOUT = "https://takeout.google.com/settings/takeout/custom/photos";
 const AUTH_PLATFORM = "https://console.cloud.google.com/auth/overview";
 const CLIENTS = "https://console.cloud.google.com/auth/clients";
 
@@ -162,6 +164,12 @@ export default function GooglePhotosScreen() {
               </View>
             </Group>
 
+            <DriveSyncSection drive={photos.drive} onConnect={() => void run("signin", async () => {
+              const { url } = await api.googlePhotosSignIn(origin(), { drive: true });
+              if (Platform.OS === "web") window.location.href = url;
+              else await Linking.openURL(url);
+            })} onSynced={load} />
+
             <Group title="Who can use them" footer="They get the photos tool: contact sheets of what you've shared, and tags they keep as they go. They never post anything.">
               {photos.interns.map((intern) => (
                 <Row
@@ -195,6 +203,119 @@ export default function GooglePhotosScreen() {
         )}
       </ScrollView>
     </Screen>
+  );
+}
+
+const synced = (iso: string) => {
+  const ago = relativeTime(iso);
+  return ago === "now" ? "Synced just now" : `Synced ${ago} ago`;
+};
+
+const SKIP_LABEL: Record<string, string> = {
+  "before the start date": "before your start date",
+  "already in the library": "already shared",
+  screenshot: "screenshots",
+  video: "videos",
+  "other file": "other files",
+  unreadable: "unreadable",
+};
+
+/**
+ * Photos synced from Google Drive: Takeout exports (once, or every two
+ * months) and anything saved into the Interns Photos folder, from a start
+ * date the owner picks. Checks every 6 hours on its own.
+ */
+function DriveSyncSection({ drive, onConnect, onSynced }: { drive: boolean; onConnect: () => void; onSynced: () => void }) {
+  const { api } = useSettings();
+  const { colors } = useAppTheme();
+  const [sync, setSync] = useState<DriveSyncStatus | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const load = useCallback(() => {
+    api.driveSync().then(setSync, setError);
+  }, [api]);
+  useEffect(() => {
+    if (drive) load();
+  }, [drive, load]);
+  // While it runs, follow it.
+  useEffect(() => {
+    if (!sync?.running) return;
+    const timer = setInterval(() => {
+      api.driveSync().then((next) => {
+        setSync(next);
+        if (!next.running) onSynced();
+      }, () => {});
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [api, sync?.running, onSynced]);
+
+  const change = (patch: Partial<DriveSyncStatus["settings"]>) => void api.updateDriveSync(patch).then(setSync, setError);
+
+  if (!drive) {
+    return (
+      <Group title="Sync from Google Drive" footer="Interns only look in your Takeout exports and the Interns Photos folder. Google's permission covers Drive as a whole, read-only; the only thing Interns creates is that folder.">
+        <View style={styles.panel}>
+          <Text variant="subtle">Keep photos coming in on their own: a Google Takeout export lands in your Drive, and Interns picks it up, from the date you choose.</Text>
+          <Button label="Connect Google Drive" tone="primary" onPress={onConnect} />
+        </View>
+      </Group>
+    );
+  }
+  if (!sync) return error ? <ErrorNote error={error} onRetry={load} /> : null;
+
+  const year = Number(sync.settings.from.slice(0, 4));
+  const now = new Date().getFullYear();
+  const years = Array.from({ length: 8 }, (_, i) => now - 7 + i);
+  const r = sync.last_result;
+  const skipped = r ? Object.entries(r.skipped).filter(([, n]) => n).map(([k, n]) => `${n} ${SKIP_LABEL[k] ?? k}`).join(", ") : "";
+  return (
+    <>
+      <Group title="Sync from Google Drive" footer={`Checks every 6 hours${sync.settings.enabled ? "" : " (off)"}. Only photos taken from ${sync.settings.from} are kept; duplicates are skipped.`}>
+        <View style={styles.panel}>
+          <Text variant="label">Photos from</Text>
+          <View style={styles.years}>
+            {years.map((y) => (
+              <Button key={y} label={String(y)} tone={y === year ? "primary" : "neutral"} small onPress={() => change({ from: `${y}-01-01` })} />
+            ))}
+          </View>
+          {sync.running ? (
+            <Text variant="subtle" color={colors.text}>{sync.progress ?? "Syncing…"}</Text>
+          ) : r ? (
+            <Text variant="subtle" color={r.error ? colors.action : colors.text}>
+              {`${synced(sync.last_run_at!)}: ${r.error ?? `${r.imported} new ${r.imported === 1 ? "photo" : "photos"}${skipped ? ` (skipped ${skipped})` : ""}.`}`}
+            </Text>
+          ) : (
+            <Text variant="subtle">Not synced yet.</Text>
+          )}
+          <Button label={sync.running ? "Syncing…" : "Sync now"} tone="primary" busy={sync.running} onPress={() => void api.runDriveSync().then(setSync, setError)} />
+          {error ? <ErrorNote error={error} onDismiss={() => setError(null)} /> : null}
+        </View>
+        <Row label="Skip screenshots" right={<Switch label="Skip screenshots" value={sync.settings.skip_screenshots} onChange={(v) => change({ skip_screenshots: v })} />} />
+        <Row label="Videos, as a still" right={<Switch label="Videos, as a still" value={sync.settings.videos} onChange={(v) => change({ videos: v })} />} />
+        <Row label="Check on its own" detail="Every 6 hours" right={<Switch label="Check on its own" value={sync.settings.enabled} onChange={(v) => change({ enabled: v })} />} />
+        {sync.folder ? <Row label={sync.folder.name} detail="Anything saved here is synced too" value="Open" onPress={() => void Linking.openURL(sync.folder!.url)} /> : null}
+      </Group>
+
+      <Group title="Bring in your Google Photos" footer="Google prepares the export in a few hours and puts it in your Drive. Interns finds it there on its own: nothing to download or move.">
+        <View style={styles.panel}>
+          {[
+            "Open Google Takeout below. Only Google Photos is selected.",
+            `Under Google Photos, tap “All photo albums included” and keep the “Photos from ${year}” folders onward (or leave everything; only photos from ${year} are kept).`,
+            "Next step: Destination “Add to Drive”, Frequency “Export every 2 months for 1 year”, file type .zip, size 50 GB.",
+            "Create export. That's it: each export lands in Drive and is synced from there.",
+          ].map((t, i) => (
+            <View key={t} style={styles.step}>
+              <Text variant="subtle" color={colors.text} style={styles.stepNo}>
+                {i + 1}
+              </Text>
+              <Text variant="subtle" style={styles.flex}>
+                {t}
+              </Text>
+            </View>
+          ))}
+          <Button label="Open Google Takeout" tone="neutral" onPress={() => void Linking.openURL(TAKEOUT)} />
+        </View>
+      </Group>
+    </>
   );
 }
 
@@ -257,13 +378,13 @@ function SetupApp({ existing, onSaved, onCancel }: { existing: string | null; on
   };
   const input = [styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text, fontSize: scaledFont(16, fontScale) }];
   const steps = [
-    "In Google Cloud Console, pick or create a project and enable the Google Photos Picker API.",
+    "In Google Cloud Console, pick or create a project, then tap Enable the APIs below (Photos Picker and Drive, in one go).",
     "Under Google Auth Platform, set up the consent screen: External, then add your own Google account as a test user.",
     "Under Clients, create a client of type Web application and add this authorised redirect URI:",
     "Paste the client ID and client secret below. Easiest on a computer.",
   ];
   return (
-    <Group title={existing ? "Change Google client" : "Set up Google Photos"} footer="Only the picker permission is asked for: interns can see the photos you choose and nothing else in your library.">
+    <Group title={existing ? "Change Google client" : "Set up Google Photos"} footer="Interns see only the photos you pick, and, if you turn on the Drive sync, what's in your Takeout exports and the Interns Photos folder.">
       <View style={styles.panel}>
         {steps.map((s, i) => (
           <View key={s} style={styles.stepWrap}>
@@ -291,7 +412,7 @@ function SetupApp({ existing, onSaved, onCancel }: { existing: string | null; on
           </View>
         ))}
         <View style={styles.buttons}>
-          <Button label="Enable the Picker API" tone="neutral" small onPress={() => void Linking.openURL(PICKER_API)} />
+          <Button label="Enable the APIs" tone="neutral" small onPress={() => void Linking.openURL(PICKER_API)} />
           <Button label="Consent screen" tone="neutral" small onPress={() => void Linking.openURL(AUTH_PLATFORM)} />
           <Button label="Create a client" tone="neutral" small onPress={() => void Linking.openURL(CLIENTS)} />
         </View>
@@ -318,5 +439,6 @@ const styles = StyleSheet.create({
   // stacked: a URL has no spaces to wrap at, so a button beside it gets pushed off
   uri: { alignItems: "flex-start", gap: space.sm, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, padding: space.md, marginLeft: 26 },
   buttons: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
+  years: { flexDirection: "row", flexWrap: "wrap", gap: space.xs },
   input: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingHorizontal: space.lg, paddingVertical: space.md },
 });

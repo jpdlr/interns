@@ -17,6 +17,7 @@ import { Orchestrator } from "./orchestrator.js";
 import { PushService, wirePushNotifications } from "./push.js";
 import { ConnectorService } from "./connectors.js";
 import { GooglePhotos } from "./photos.js";
+import { DriveSync } from "./drivesync.js";
 import { DraftLearner } from "./draftlearn.js";
 import { localZone, setProfile } from "./profile.js";
 import { migrateSchedules } from "./schedules.js";
@@ -71,6 +72,13 @@ async function main(): Promise<void> {
   // Connectors: Outlook sign-in and the GitHub App flow from the app (connectors.ts)
   // Google Photos: photos the owner picks, copied into a library interns can browse (photos.ts)
   const photos = new GooglePhotos(home, registry);
+  // Photos from Google Drive (Takeout exports, the Interns Photos folder), every 6 hours (drivesync.ts)
+  const driveSync = new DriveSync(home, photos);
+  const syncDrive = () => {
+    if (driveSync.status().settings.enabled && photos.driveGranted()) void driveSync.run();
+  };
+  setTimeout(syncDrive, 2 * 60_000);
+  setInterval(syncDrive, 6 * 60 * 60_000);
   const connectors = new ConnectorService({ db, registry, config, home, github, githubwatch, mailwatch, photos });
   const orchestrator = new Orchestrator(db, registry, engine, config, mailwatch, discord, push);
   orchestrator.suggestHome = home;
@@ -91,6 +99,7 @@ async function main(): Promise<void> {
     home,
     connectors,
     photos,
+    driveSync,
   });
   const notifier = wirePushNotifications(bus, registry, push, db);
   // learn from the owner's draft edits: sent drafts are compared every half hour (draftlearn.ts)

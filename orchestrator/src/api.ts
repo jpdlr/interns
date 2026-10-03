@@ -13,6 +13,7 @@ import { DEFAULT_STYLE, StyleSchema } from "./style.js";
 import { learnedView, ownerSetStyle, reactTo, ReactionError, undoStyleChange } from "./reactions.js";
 import { registerConnectorRoutes, unknownMailboxes, type ConnectorService } from "./connectors.js";
 import { registerPhotosRoutes, type GooglePhotos } from "./photos.js";
+import { registerDriveSyncRoutes, type DriveSync } from "./drivesync.js";
 import { fillPreviews, ingestImagePath, MediaError, readMedia, saveMedia, mediaUrl, signMedia, withMediaUrls } from "./pagemedia.js";
 import { z } from "zod";
 import type { ApprovalService } from "./approvals.js";
@@ -250,6 +251,8 @@ export async function startApi(deps: {
   connectors?: ConnectorService;
   /** Google Photos picker and library (photos.ts) */
   photos?: GooglePhotos;
+  /** Google Drive photo sync (drivesync.ts) */
+  driveSync?: DriveSync;
 }): Promise<FastifyInstance> {
   const { db, registry, bus, config, discord, push, approvals, capabilities, github, orchestrator } = deps;
   const calendar = deps.calendar ?? cachedCalendar(calendarMailbox(config));
@@ -1110,6 +1113,7 @@ export async function startApi(deps: {
   // Icon + tool catalogs the app's pickers render from, so they never drift from the backend's source of truth.
   if (deps.connectors) registerConnectorRoutes(app, deps.connectors);
   if (deps.photos) registerPhotosRoutes(app, deps.photos);
+  if (deps.driveSync) registerDriveSyncRoutes(app, deps.driveSync);
 
   app.get("/meta", async () => {
     return { icons: ICONS, tools: INTERN_ASSIGNABLE_TOOL_NAMES };
