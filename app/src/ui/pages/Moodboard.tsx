@@ -24,7 +24,10 @@ const newId = () => `m_${Date.now().toString(36)}${Math.random().toString(36).sl
 export function MoodboardView({ page, ask, focusItem, onChanged }: { page: Page; ask: AskOwner; focusItem?: string; onChanged: (page: Page) => void }) {
   const { api } = useSettings();
   const { colors, fontScale } = useAppTheme();
-  const items = [...((page.data as MoodboardData).items ?? [])].reverse(); // newest first
+  // What you add (it has a time) goes on top, newest first; an intern's
+  // references keep the order the intern gave them.
+  const all = (page.data as MoodboardData).items ?? [];
+  const items = [...all.filter((i) => i.ts).sort((a, b) => b.ts!.localeCompare(a.ts!)), ...all.filter((i) => !i.ts)];
   const [open, setOpen] = useState<MoodboardItem | null>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(0);
