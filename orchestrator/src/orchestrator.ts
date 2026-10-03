@@ -11,6 +11,7 @@
 import { randomUUID } from "node:crypto";
 import { adviseIdlePriority, type AdvisorVerdict } from "./advisor.js";
 import { localDate } from "./agenda.js";
+import { cronMatches } from "./schedules.js";
 import { ownerName } from "./profile.js";
 import { quickRepliesFence } from "./fences.js";
 import type { Config } from "./config.js";
@@ -87,13 +88,6 @@ export function stripAttachmentMarkers(text: string): string {
   return text.replace(/\s*\[attachment:[0-9a-f-]{8,}\]\s*/gi, " ").replace(/[ \t]+\n/g, "\n").trim();
 }
 
-// ------------------------------------------------------------------- cron
-
-/**
- * Minimal 5-field cron matcher (minute hour dom month dow). Supports "*",
- * "*\/n", single numbers, comma lists, and ranges "a-b". Enough for intern
- * triggers; swap for a real library if manifests need more.
- */
 /** Whether other interns' @mentions wake this intern (triggers.mentions, on unless set false; never while paused). */
 export function takesMentions(manifest: InternManifest | undefined): boolean {
   return Boolean(manifest) && !manifest!.paused && manifest!.triggers.mentions !== false;
@@ -123,23 +117,8 @@ export function heldWorkLabel(task: Task): string {
   return "a task";
 }
 
-export function cronMatches(expr: string, date: Date): boolean {
-  const fields = expr.trim().split(/\s+/);
-  if (fields.length !== 5) return false;
-  const values = [date.getMinutes(), date.getHours(), date.getDate(), date.getMonth() + 1, date.getDay()];
-  return fields.every((field, i) => cronFieldMatches(field!, values[i]!));
-}
-
-function cronFieldMatches(field: string, value: number): boolean {
-  return field.split(",").some((part) => {
-    if (part === "*") return true;
-    const step = part.match(/^\*\/(\d+)$/);
-    if (step) return value % Number(step[1]) === 0;
-    const range = part.match(/^(\d+)-(\d+)$/);
-    if (range) return value >= Number(range[1]) && value <= Number(range[2]);
-    return Number(part) === value;
-  });
-}
+// Crons are matched on the owner's wall clock (schedules.ts).
+export { cronMatches } from "./schedules.js";
 
 // ------------------------------------------------------------ orchestrator
 

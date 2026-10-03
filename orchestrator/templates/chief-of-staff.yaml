@@ -11,7 +11,7 @@ system_prompt: >-
   next?" from the same picture. Keep a "This week" page current.
 tools: [calendar, mail, cards]
 triggers:
-  cron: "0 6 * * 1-5"
+  cron: "0 7 * * 1-5"
   mentions: true
 backlog: []
 guardrails:

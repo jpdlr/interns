@@ -2,7 +2,7 @@
  * Entry point: wire config → db → registry → engine → discord → api →
  * orchestrator loop, with graceful shutdown on SIGINT/SIGTERM.
  */
-import { loadConfig, internsHome } from "./config.js";
+import { loadConfig, internsHome, saveConfig } from "./config.js";
 import { ApprovalService } from "./approvals.js";
 import { CapabilityService } from "./capabilities.js";
 import { Db } from "./db.js";
@@ -15,7 +15,8 @@ import { MailWatcher } from "./mailwatch.js";
 import { MeetingWatcher } from "./meetingwatch.js";
 import { Orchestrator } from "./orchestrator.js";
 import { PushService, wirePushNotifications } from "./push.js";
-import { setProfile } from "./profile.js";
+import { localZone, setProfile } from "./profile.js";
+import { migrateSchedules } from "./schedules.js";
 import { Registry } from "./registry.js";
 import { wireSuggestionDecisions } from "./suggest.js";
 
@@ -27,6 +28,24 @@ async function main(): Promise<void> {
   const db = new Db(bus, home);
   db.apiToken = config.api_token; // attachments carry HMAC-signed download URLs
   const registry = new Registry(home);
+
+  // Crons used to run on this machine's clock; move them to the owner's zone once.
+  if (!config.schedules_local) {
+    const machineZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const result = migrateSchedules(registry, config, machineZone, localZone());
+    saveConfig(config, home);
+    for (const c of result.changed) console.log(`[schedules] ${c.what}: "${c.from}" → "${c.to}" (${machineZone} → ${localZone()})`);
+    if (result.unconverted.length) {
+      const list = result.unconverted.map((u) => `- **${u.what}**: \`${u.cron}\``).join("\n");
+      db.createCard({
+        intern: "coordinator",
+        title: "Check these schedules",
+        body: `Schedules now run on your clock (${localZone()}) instead of the server's (${machineZone}). These couldn't be moved automatically, so they now fire at the same clock time in your zone:\n\n${list}`,
+        severity: "action",
+        actions: [{ id: "ok", label: "Got it", style: "primary", kind: "button" }],
+      });
+    }
+  }
 
   // Mirror on-disk manifests into db identity rows (manifests are truth).
   for (const { slug, manifest } of registry.list()) {

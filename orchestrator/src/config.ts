@@ -16,6 +16,12 @@ export const ConfigSchema = z.object({
   owner_name: z.string().min(1).default("Boss"),
   /** IANA time zone for Today, agendas and calendar times; empty = this machine's zone */
   timezone: z.string().default(""),
+  /**
+   * true once crons (intern schedules, standup_cron, suggest_cron) are written
+   * in the owner's `timezone`. Older installs matched them on the server's
+   * clock; startup migrates them once (schedules.ts) and sets this.
+   */
+  schedules_local: z.boolean().default(false),
   /** set when the app's first-run setup finishes; empty = show setup (unless a crew already exists) */
   setup_completed_at: z.string().default(""),
   /** localhost-only HTTP API port */
@@ -37,7 +43,7 @@ export const ConfigSchema = z.object({
   suggest_enabled: z.boolean().default(true),
   /** one day a month the standup arrives in a surprise voice (limerick, weather report…); false = always plain */
   standup_easter_eggs: z.boolean().default(true),
-  /** 5-field cron expression for the automatic morning standup (heartbeat-driven, same guard as intern crons) */
+  /** 5-field cron for the automatic morning standup, in the owner's time zone (heartbeat-driven, same guard as intern crons) */
   standup_cron: z.string().default("0 7 * * 1-5"),
   /** how often mailwatch polls the graph-mail CLI for new inbox mail */
   mail_poll_minutes: z.number().positive().default(2),
@@ -187,6 +193,8 @@ export function loadConfig(baseDir: string = internsHome()): Config {
   }
   const config = ConfigSchema.parse(raw);
   let dirty = !fs.existsSync(file);
+  // A new install starts with crons in the owner's zone: nothing to migrate.
+  if (dirty) config.schedules_local = true;
   if (!config.api_token) {
     config.api_token = randomBytes(24).toString("base64url");
     dirty = true;

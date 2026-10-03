@@ -275,7 +275,7 @@ every key. The ones you'll most likely touch:
 | `owner_name` | `"Boss"` | What the interns call you |
 | `timezone` | this machine's | IANA zone for Today, local dates and calendar times |
 | `bind` / `port` | `127.0.0.1` / `7810` | Where the API and app are served |
-| `standup_cron` | `0 7 * * 1-5` | Morning standup (cron in UTC) |
+| `standup_cron` | `0 7 * * 1-5` | Morning standup (cron, in your `timezone`; so are interns' schedules) |
 | `engine.model` | SDK default | Model for intern sessions |
 | `engine.permission_mode` | `dontAsk` | `dontAsk` enforces each intern's tool grants; see [Safety](#safety) |
 | `mailboxes`, `graph.client_id` | none | Outlook mailboxes (see above) |

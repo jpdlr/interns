@@ -19,6 +19,7 @@ import {
   WEEKDAYS,
   type Schedule,
 } from "../schedule";
+import { useOwnerZone } from "../owner";
 import { radius, scaledFont, space, useAppTheme } from "../theme";
 import { Text } from "./Text";
 
@@ -32,10 +33,11 @@ export function SchedulePicker({ value, onChange }: { value: string; onChange: (
   const s = useMemo(() => parseSchedule(value), [value]);
   const [advanced, setAdvanced] = useState(s.custom !== null);
   const set = (patch: Partial<Schedule>) => onChange(scheduleToCron({ ...s, custom: null, ...patch }));
+  const zone = useOwnerZone();
   const next = useMemo(() => {
-    const at = value.trim() ? nextRun(value) : null;
-    return at ? formatLocal(at) : null;
-  }, [value]);
+    const at = value.trim() ? nextRun(value, new Date(), zone) : null;
+    return at ? formatLocal(at, zone) : null;
+  }, [value, zone]);
 
   const toggleDay = (d: number) => {
     const days = s.custom !== null ? [d] : s.days.includes(d) ? s.days.filter((x) => x !== d) : [...s.days, d];
@@ -114,7 +116,7 @@ export function SchedulePicker({ value, onChange }: { value: string; onChange: (
             autoCorrect={false}
             style={[styles.input, fieldStyle, { fontSize: scaledFont(15, fontScale) }]}
           />
-          <Text variant="caption">Cron in UTC (the server's clock): minute hour day month weekday.</Text>
+          <Text variant="caption">{`Cron on your clock (${zone}): minute hour day month weekday.`}</Text>
         </View>
       ) : (
         <Pressable onPress={() => setAdvanced(true)} accessibilityRole="button" hitSlop={6} style={styles.advancedLink}>

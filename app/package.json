@@ -34,7 +34,7 @@
     "mock": "node tools/mock-orchestrator.mjs",
     "serve:dist": "node tools/serve-dist.mjs dist 7812",
     "check:pwa": "node tools/pwa-check.mjs",
-    "check:schedule": "TZ=Africa/Johannesburg ../orchestrator/node_modules/.bin/tsx tools/schedule-check.ts"
+    "check:schedule": "../orchestrator/node_modules/.bin/tsx tools/schedule-check.ts"
   },
   "private": true,
   "license": "MIT"

@@ -5,6 +5,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Schedules run on your clock.** Intern schedules, `standup_cron` and `suggest_cron`
+  are matched in your `timezone` (daylight saving included) instead of the server's
+  clock. Existing installs are migrated once at startup so nothing fires at a different
+  moment; a schedule that can't be converted is left as written and flagged on a card.
+
 ## [0.1.0] - 2026-10-03
 
 The first public release.

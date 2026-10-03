@@ -6,17 +6,10 @@
  * "every N minutes/hours". No days = no schedule. Anything else a cron string
  * can say is kept untouched as `custom`.
  *
- * The orchestrator matches cron against its own clock, which is UTC, while the
- * owner thinks in this device's local time. So times here are local and get
- * converted with the device's current UTC offset: in SAST (UTC+2), 09:00 on
- * Monday is `0 7 * * 1`, and 01:00 on Monday is `0 23 * * 0` (the day moves
- * too). In zones with daylight saving the stored cron keeps its UTC time, so
- * a schedule shifts by an hour when the clocks change.
+ * The orchestrator matches cron on the owner's wall clock (their `timezone`
+ * setting), so the times here are stored as written: Mondays at 09:00 is
+ * `0 9 * * 1`, all year round. Only "next run" needs the zone.
  */
-
-export const LOCAL_OFFSET_MINUTES = -new Date().getTimezoneOffset();
-export const LOCAL_ZONE_LABEL =
-  new Intl.DateTimeFormat(undefined, { timeZoneName: "short" }).formatToParts(new Date()).find((p) => p.type === "timeZoneName")?.value ?? "local";
 
 export interface Schedule {
   /** local days, 0 = Sunday … 6 = Saturday; empty = no schedule */
@@ -28,7 +21,7 @@ export interface Schedule {
   every: number | null;
   /** repeats: true = around the clock; false = working hours (08:00–18:00 local) */
   allDay: boolean;
-  /** a cron the model can't express, kept as typed (UTC) */
+  /** a cron the model can't express, kept as typed */
   custom: string | null;
 }
 
@@ -40,17 +33,16 @@ export const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
 
 export const EMPTY_SCHEDULE: Schedule = { days: [], hour: 9, minute: 0, every: null, allDay: false, custom: null };
 
-/** Working hours for repeats, local: from 08:00, the last run at 18:00. */
+/** Working hours for repeats: from 08:00, the last run at 18:00. */
 export const WORK_START = 8;
 export const WORK_END = 18;
-const utcHour = (localHour: number) => mod(Math.floor(localHour - LOCAL_OFFSET_MINUTES / 60), 24);
 
-/** The UTC hour field for repeats inside working hours. */
+/** The hour field for repeats inside working hours. */
 function workHours(every: number): string {
-  if (every < 60) return `${utcHour(WORK_START)}-${utcHour(WORK_END - 1)}`; // every 15/30 min, 08:00–17:45
-  if (every === 60) return `${utcHour(WORK_START)}-${utcHour(WORK_END)}`; // hourly 08:00–18:00
+  if (every < 60) return `${WORK_START}-${WORK_END - 1}`; // every 15/30 min, 08:00–17:45
+  if (every === 60) return `${WORK_START}-${WORK_END}`; // hourly 08:00–18:00
   const hours: number[] = [];
-  for (let h = WORK_START; h <= WORK_END; h += every / 60) hours.push(utcHour(h));
+  for (let h = WORK_START; h <= WORK_END; h += every / 60) hours.push(h);
   return hours.join(",");
 }
 
@@ -92,7 +84,7 @@ function formatDays(days: number[]): string {
   return parts.join(",");
 }
 
-/** Read a stored (UTC) cron into the local-time model. */
+/** Read a stored cron into the schedule model. */
 export function parseSchedule(cron: string | null | undefined): Schedule {
   const raw = (cron ?? "").trim();
   if (!raw) return { ...EMPTY_SCHEDULE };
@@ -101,38 +93,29 @@ export function parseSchedule(cron: string | null | undefined): Schedule {
   if (f.length !== 5) return custom;
   const [min, hour, dom, month, dow] = f as [string, string, string, string, string];
   if (dom !== "*" || month !== "*") return custom;
-  const utcDays = parseDays(dow);
-  if (!utcDays || utcDays.length === 0) return custom;
+  const cronDays = parseDays(dow);
+  if (!cronDays || cronDays.length === 0) return custom;
 
   // Repeats through the day: "*/30 * * * 1-5", "0 */2 * * *", "0 * * * *".
-  // (Days for repeats stay as the server's days: a repeat spans the whole day.)
   const everyMin = /^\*\/(\d+)$/.exec(min);
   if (everyMin && INTERVALS.includes(Number(everyMin[1])) && (hour === "*" || hour === workHours(Number(everyMin[1])))) {
-    return { ...EMPTY_SCHEDULE, days: utcDays, every: Number(everyMin[1]), allDay: hour === "*" };
+    return { ...EMPTY_SCHEDULE, days: cronDays, every: Number(everyMin[1]), allDay: hour === "*" };
   }
   const everyHour = /^\*\/(\d+)$/.exec(hour);
   if (min === "0" && (hour === "*" || (everyHour && INTERVALS.includes(Number(everyHour[1]) * 60)))) {
-    return { ...EMPTY_SCHEDULE, days: utcDays, every: hour === "*" ? 60 : Number(everyHour![1]) * 60, allDay: true };
+    return { ...EMPTY_SCHEDULE, days: cronDays, every: hour === "*" ? 60 : Number(everyHour![1]) * 60, allDay: true };
   }
   if (min === "0") {
     const work = INTERVALS.filter((e) => e >= 60).find((e) => workHours(e) === hour);
-    if (work) return { ...EMPTY_SCHEDULE, days: utcDays, every: work, allDay: false };
+    if (work) return { ...EMPTY_SCHEDULE, days: cronDays, every: work, allDay: false };
   }
 
   // Once a day at a fixed time.
   if (!/^\d+$/.test(min) || !/^\d+$/.test(hour) || Number(min) > 59 || Number(hour) > 23) return custom;
-  const local = Number(hour) * 60 + Number(min) + LOCAL_OFFSET_MINUTES;
-  const shift = Math.floor(local / 1440);
-  const minutes = mod(local, 1440);
-  return {
-    ...EMPTY_SCHEDULE,
-    days: utcDays.map((d) => mod(d + shift, 7)).sort((a, b) => a - b),
-    hour: Math.floor(minutes / 60),
-    minute: minutes % 60,
-  };
+  return { ...EMPTY_SCHEDULE, days: cronDays, hour: Number(hour), minute: Number(min) };
 }
 
-/** The (UTC) cron for a schedule; "" means no schedule. */
+/** The cron for a schedule; "" means no schedule. */
 export function scheduleToCron(s: Schedule): string {
   if (s.custom !== null) return s.custom.trim();
   if (s.days.length === 0) return "";
@@ -141,10 +124,7 @@ export function scheduleToCron(s: Schedule): string {
     if (!s.allDay) return s.every < 60 ? `*/${s.every} ${workHours(s.every)} * * ${dow}` : `0 ${workHours(s.every)} * * ${dow}`;
     return s.every < 60 ? `*/${s.every} * * * ${dow}` : s.every === 60 ? `0 * * * ${dow}` : `0 */${s.every / 60} * * ${dow}`;
   }
-  const utc = s.hour * 60 + s.minute - LOCAL_OFFSET_MINUTES;
-  const shift = Math.floor(utc / 1440);
-  const minutes = mod(utc, 1440);
-  return `${minutes % 60} ${Math.floor(minutes / 60)} * * ${formatDays(s.days.map((d) => mod(d + shift, 7)))}`;
+  return `${s.minute} ${s.hour} * * ${formatDays(s.days)}`;
 }
 
 /** "Every day" / "Weekdays" / "Weekends" / "Mondays and Thursdays". */
@@ -162,7 +142,7 @@ export function everyPhrase(every: number): string {
 
 /** Plain words: "Mondays at 09:00", "Weekdays, every 2 hours", "Off". */
 export function describeSchedule(s: Schedule): string {
-  if (s.custom !== null) return `Custom: ${s.custom} (UTC)`;
+  if (s.custom !== null) return `Custom: ${s.custom}`;
   if (s.days.length === 0) return "Off";
   if (s.every) return `${daysPhrase(s.days)}, ${everyPhrase(s.every)}${s.allDay ? ", around the clock" : `, ${pad(WORK_START)}:00–${pad(WORK_END)}:00`}`;
   return `${daysPhrase(s.days)} at ${pad(s.hour)}:${pad(s.minute)}`;
@@ -186,30 +166,42 @@ function fieldMatches(field: string, value: number): boolean {
   });
 }
 
-/** Same matcher as the orchestrator (orchestrator.ts cronMatches), on UTC fields. */
-function utcMatches(cron: string, d: Date): boolean {
-  const f = cron.trim().split(/\s+/);
-  if (f.length !== 5) return false;
-  const values = [d.getUTCMinutes(), d.getUTCHours(), d.getUTCDate(), d.getUTCMonth() + 1, d.getUTCDay()];
-  return f.every((field, i) => fieldMatches(field, values[i]!));
+const WEEKDAY_INDEX: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** minute, hour, day, month, weekday of `d` on `zone`'s clock (same as the orchestrator's schedules.ts). */
+function zonedFields(d: Date, zone: string): [number, number, number, number, number] {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: zone, hourCycle: "h23", minute: "numeric", hour: "numeric", day: "numeric", month: "numeric", weekday: "short",
+  }).formatToParts(d);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "0";
+  return [Number(get("minute")), Number(get("hour")), Number(get("day")), Number(get("month")), WEEKDAY_INDEX[get("weekday")] ?? 0];
 }
 
-/** The next time this cron fires after `from` (within 8 days), or null. */
-export function nextRun(cron: string, from: Date = new Date()): Date | null {
+/** Same matcher as the orchestrator (schedules.ts cronMatches), on the owner's clock. */
+function zonedMatches(cron: string, d: Date, zone: string): boolean {
+  const f = cron.trim().split(/\s+/);
+  if (f.length !== 5) return false;
+  const values = zonedFields(d, zone);
+  return f.every((field, i) => fieldMatches(field, values[i]!) || (i === 4 && values[4] === 0 && fieldMatches(field, 7)));
+}
+
+/** The next time this cron fires after `from` (within 8 days) on `zone`'s clock, or null. */
+export function nextRun(cron: string, from: Date = new Date(), zone?: string): Date | null {
   if (!cron.trim()) return null;
+  const tz = zone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   const t = new Date(from.getTime());
   t.setUTCSeconds(0, 0);
   for (let i = 1; i <= 8 * 1440; i++) {
     const candidate = new Date(t.getTime() + i * 60_000);
-    if (utcMatches(cron, candidate)) return candidate;
+    if (zonedMatches(cron, candidate, tz)) return candidate;
   }
   return null;
 }
 
-/** "Mon 5 Oct, 09:00" in local time. */
-export function formatLocal(d: Date): string {
-  const local = new Date(d.getTime() + LOCAL_OFFSET_MINUTES * 60_000);
-  const day = DAY_NAMES[local.getUTCDay()]!.slice(0, 3);
-  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][local.getUTCMonth()];
-  return `${day} ${local.getUTCDate()} ${month}, ${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}`;
+/** "Mon 5 Oct, 09:00" on `zone`'s clock. */
+export function formatLocal(d: Date, zone?: string): string {
+  const tz = zone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const [minute, hour, day, month, weekday] = zonedFields(d, tz);
+  return `${DAY_NAMES[weekday]!.slice(0, 3)} ${day} ${MONTHS[month - 1]}, ${pad(hour)}:${pad(minute)}`;
 }

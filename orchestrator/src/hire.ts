@@ -44,7 +44,7 @@ Expand this into a complete intern manifest. Respond with ONLY a JSON object (no
 - "persona": 2-3 sentences describing the intern's voice and personality
 - "system_prompt": a thorough system prompt for the intern's working sessions (their job, boundaries, how they report back). Written in second person.
 - "tools": array chosen ONLY from this catalog: ${JSON.stringify(INTERN_ASSIGNABLE_TOOL_NAMES)} — pick the minimum the role needs
-- "triggers": object; include "cron" (5-field cron string) only if the role benefits from a routine, "mentions": true
+- "triggers": object; include "cron" (5-field cron string, in ${ownerName()}'s local time) only if the role benefits from a routine, "mentions": true
 - "backlog": array of exactly 3 STRINGS (each one starter backlog item: standing idle work, concrete and self-contained — plain strings, not objects)
 - "guardrails": {"drafts_only": true, "daily_token_cap": 200000}
 - "required_capabilities": array of {"id","reason"}. Use a known id when applicable: ${JSON.stringify(
