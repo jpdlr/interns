@@ -11,7 +11,7 @@
 # && npm run export:web). State and config live in ~/.interns; the API token
 # and other secrets stay in ~/.interns/config.json (mode 0600), never here.
 [Unit]
-Description=Interns orchestrator (Chaos Coordinator)
+Description=Interns orchestrator (Coordinator)
 After=network-online.target
 Wants=network-online.target
 

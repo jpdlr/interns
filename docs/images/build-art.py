@@ -54,7 +54,7 @@ def hero():
   {background(w, h)}
   {sparkle(140, 70, 14, 0.35)}{sparkle(1150, 92, 18, 0.8)}{sparkle(1080, 40, 8, 0.3)}{sparkle(220, 150, 7, 0.25)}
   <text x="{w/2}" y="104" text-anchor="middle" font-family="{FONT}" font-size="76" font-weight="800" fill="#f5f6fa" letter-spacing="-1">Interns</text>
-  <text x="{w/2}" y="150" text-anchor="middle" font-family="{FONT}" font-size="24" fill="#a8b1c2">A crew of AI agents that work for you, run by the Chaos Coordinator</text>
+  <text x="{w/2}" y="150" text-anchor="middle" font-family="{FONT}" font-size="24" fill="#a8b1c2">A crew of AI agents that work for you, run by the Coordinator</text>
   <rect x="{w/2 - 60}" y="172" width="64" height="6" rx="3" fill="#8b5cf6"/><rect x="{w/2 + 12}" y="172" width="24" height="6" rx="3" fill="#f59e0b"/><rect x="{w/2 + 44}" y="172" width="12" height="6" rx="3" fill="#22c55e"/>
   {"".join(faces)}
 </svg>

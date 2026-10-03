@@ -15,7 +15,7 @@ import {
   InternManifestSchema,
   slugify,
 } from "./types.js";
-import { ownerName } from "./profile.js";
+import { coordinatorName, ownerName } from "./profile.js";
 
 export interface HireCandidate {
   draft: InternManifest;
@@ -33,7 +33,7 @@ export const hirePrompt = (roughRole: string, taken: string[] = []) => {
   const nameRule =
     `short friendly human first name (one word${examples.length ? `, e.g. ${examples.map((n) => `"${n}"`).join(", ")}` : ""})` +
     (taken.length ? `. These are already taken, so pick a name that is none of them: ${JSON.stringify(taken)}` : "");
-  return `You are the Chaos Coordinator hiring a new AI intern for ${ownerName()}'s personal crew.
+  return `You are the ${coordinatorName()} hiring a new AI intern for ${ownerName()}'s personal crew.
 
 Rough role from ${ownerName()}: "${roughRole}"
 

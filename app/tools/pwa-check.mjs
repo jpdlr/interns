@@ -232,7 +232,7 @@ const threadHeaderTop = () =>
 /* ----------------------------------------------- 1. crew: status bar + tabs */
 
 await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
-await page.getByText("Chaos Coordinator").first().waitFor({ timeout: 25000 });
+await page.getByText("Coordinator", { exact: true }).first().waitFor({ timeout: 25000 });
 await page.waitForTimeout(800);
 
 const env = await page.evaluate(() => {
@@ -332,7 +332,7 @@ check(
 /* -------------------------------------------- 2. thread, keyboard CLOSED */
 
 await tab(0).click();
-await page.getByText("Chaos Coordinator").first().waitFor({ timeout: 15000 });
+await page.getByText("Coordinator", { exact: true }).first().waitFor({ timeout: 15000 });
 await page.getByText("Milo", { exact: true }).first().click();
 await page.getByText("Morning — anything owed today?").first().waitFor({ timeout: 20000 });
 await page.waitForTimeout(900);

@@ -24,6 +24,7 @@ import { InternFace, resolveFaceId } from "../../src/ui/InternFace";
 import { Markdown } from "../../src/ui/Markdown";
 import { EmptyState, ErrorNote, Loading, Screen } from "../../src/ui/Screen";
 import { Text } from "../../src/ui/Text";
+import { useCoordinatorName } from "../../src/owner";
 
 const OPENED_KEY = "interns.todayOpened.v1";
 /** Dates and times on Today are this device's local ones. */
@@ -38,6 +39,7 @@ export default function TodayScreen() {
   const { colors } = useAppTheme();
   const { api, ready, configured } = useSettings();
   const crew = useCrew();
+  const coordinatorName = useCoordinatorName();
   const params = useLocalSearchParams<{ card?: string }>();
   // The tab stays mounted overnight, so "today" is kept current (a minute
   // tick, and every focus) and the shown day is an offset from it.
@@ -119,7 +121,7 @@ export default function TodayScreen() {
     [api],
   );
 
-  const nameOf = useCallback((slug: string) => (slug === "coordinator" ? "Chaos Coordinator" : (crew.bySlug[slug]?.name ?? slug)), [crew.bySlug]);
+  const nameOf = useCallback((slug: string) => (slug === "coordinator" ? coordinatorName : (crew.bySlug[slug]?.name ?? slug)), [coordinatorName, crew.bySlug]);
   const faceOf = useCallback((slug: string) => (slug === "coordinator" ? "coordinator" : (crew.bySlug[slug]?.faceId ?? resolveFaceId(undefined, slug))), [crew.bySlug]);
 
   const needsYou = useMemo(() => {

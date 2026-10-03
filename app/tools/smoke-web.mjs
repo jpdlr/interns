@@ -49,7 +49,7 @@ await page.screenshot({ path: `${SHOTS}/4-settings.png` });
 
 // 2. Crew list.
 await page.getByText("Crew", { exact: true }).first().click();
-await page.getByText("Chaos Coordinator").waitFor({ timeout: 10000 });
+await page.getByText("Coordinator", { exact: true }).waitFor({ timeout: 10000 });
 await page.getByText("Milo", { exact: true }).first().waitFor();
 await page.getByText("How did ClinicFlow demo", { exact: false }).first().waitFor();
 await page.getByText("Front desk", { exact: true }).first().waitFor();

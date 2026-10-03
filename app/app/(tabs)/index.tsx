@@ -1,6 +1,6 @@
 /**
  * Crew — the chat list. One row per intern with its animated face, role,
- * last-message preview and unread dot. The Chaos Coordinator is pinned on
+ * last-message preview and unread dot. The Coordinator is pinned on
  * top: its chat is the front desk — ask anything and it routes the question
  * to the right intern, and "idea: …" lands on the Ideas page.
  */
@@ -36,6 +36,7 @@ import { Button } from "../../src/ui/Button";
 import { EmptyState, ErrorNote, Loading, Screen, ScreenTitle } from "../../src/ui/Screen";
 import { Text } from "../../src/ui/Text";
 import { TypingAvatar, TypingDots } from "../../src/ui/ThinkingIndicator";
+import { useCoordinatorName } from "../../src/owner";
 
 interface Row {
   slug: string;
@@ -80,6 +81,7 @@ export default function CrewScreen() {
   const refreshSignal = useRefreshSignal();
   const focused = useIsFocused();
   const router = useRouter();
+  const coordinatorName = useCoordinatorName();
 
   // First run: no token yet, or a fresh orchestrator with nobody hired.
   // An older orchestrator without /owner just keeps the Crew tab. Only when
@@ -247,7 +249,7 @@ export default function CrewScreen() {
     const deskSpeaker = desk?.author === "jp" ? "You: " : desk?.author === "intern" && desk.speaker ? `${interns.find((i) => i.slug === desk.speaker)?.name ?? desk.speaker}: ` : "";
     const coordinator: Row = {
       slug: "coordinator",
-      name: "Chaos Coordinator",
+      name: coordinatorName,
       role: "Front desk",
       faceId: "coordinator",
       preview: desk
@@ -340,14 +342,14 @@ export default function CrewScreen() {
         detail: intern.activity?.label ?? intern.role,
         intern,
       }));
-    if (has("Chaos Coordinator", "Orchestrator", "Front desk", "coordinator")) {
+    if (has(coordinatorName, "Orchestrator", "Front desk", "coordinator")) {
       crewResults.unshift({
         key: "intern-coordinator",
         type: "intern",
-        title: "Chaos Coordinator",
+        title: coordinatorName,
         detail: "Front desk",
         intern: {
-          slug: "coordinator", name: "Chaos Coordinator", role: "Orchestrator", icon: "coordinator",
+          slug: "coordinator", name: coordinatorName, role: "Orchestrator", icon: "coordinator",
           session_id: null, queued: 0, running: 0, paused: 0, activity: null, spend_today: 0, cost_today_usd: 0,
         },
       });

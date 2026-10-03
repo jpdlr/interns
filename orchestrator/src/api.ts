@@ -25,7 +25,7 @@ import {
 } from "./attachments.js";
 import type { CapabilityService } from "./capabilities.js";
 import { calendarMailbox, internsHome, repoRoot, saveConfig, timeZone, type Config } from "./config.js";
-import { setProfile } from "./profile.js";
+import { coordinatorName, setProfile } from "./profile.js";
 import { listTemplates, templateReady } from "./templates.js";
 import type { Db } from "./db.js";
 import type { DiscordAdapter } from "./discord.js";
@@ -1006,7 +1006,7 @@ export async function startApi(deps: {
   app.get<{ Querystring: { days?: string } }>("/reports/spend", async (req) => {
     const days = Number(req.query.days ?? 30);
     const report = db.spendReport(Number.isFinite(days) ? days : 30);
-    const names: Record<string, string> = { coordinator: "Chaos Coordinator" };
+    const names: Record<string, string> = { coordinator: coordinatorName() };
     for (const row of db.listInterns(true)) names[row.slug] = row.name;
     for (const room of db.listRooms(true)) names[room.id] = room.name;
     return { ...report, names };
@@ -1025,6 +1025,7 @@ export async function startApi(deps: {
     const hired = registry.list().filter(({ slug }) => slug !== "forge").length;
     return {
       owner_name: config.owner_name,
+      coordinator_name: config.coordinator_name,
       timezone: timeZone(config),
       timezone_configured: Boolean(config.timezone),
       own_domains: config.own_domains,
@@ -1052,6 +1053,7 @@ export async function startApi(deps: {
     const body = z
       .object({
         owner_name: z.string().trim().min(1).max(40).optional(),
+        coordinator_name: z.string().trim().min(1).max(40).optional(),
         timezone: z.string().refine((zone) => zone === "" || zoneOk(zone), "unknown time zone").optional(),
         own_domains: z.array(z.string().trim().toLowerCase().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/)).max(10).optional(),
         setup_complete: z.literal(true).optional(),

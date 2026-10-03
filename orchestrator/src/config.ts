@@ -14,6 +14,8 @@ import webpush from "web-push";
 export const ConfigSchema = z.object({
   /** what the interns call you — in their prompts, greetings and standups */
   owner_name: z.string().min(1).default("Boss"),
+  /** the front desk's name: the orchestrator's own voice in chats, standups and notifications */
+  coordinator_name: z.string().min(1).default("Coordinator"),
   /** IANA time zone for Today, agendas and calendar times; empty = this machine's zone */
   timezone: z.string().default(""),
   /**

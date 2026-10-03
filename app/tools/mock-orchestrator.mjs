@@ -22,6 +22,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 /** MOCK_FRESH=1 behaves like a brand-new install: setup not done, nobody hired. */
 const owner = {
   owner_name: process.env.MOCK_FRESH ? "Boss" : "Sam",
+  coordinator_name: "Coordinator",
   timezone: "Europe/London",
   timezone_configured: !process.env.MOCK_FRESH,
   own_domains: process.env.MOCK_FRESH ? [] : ["northwind.example"],
@@ -444,7 +445,7 @@ const server = http.createServer((req, res) => {
       { thread: "nia", tokens: 96000, cost_usd: 0.97, runs: 12, last_ts: iso(240e3) },
       { thread: "zara", tokens: 12000, cost_usd: 0.12, runs: 4, last_ts: iso(86400e3) },
     ];
-    return json(200, { days: list, by_intern, by_thread, by_thread_day: [], names: { "room-launch": "Launch week", milo: "Milo", nia: "Nia", zara: "Zara", coordinator: "Chaos Coordinator" } });
+    return json(200, { days: list, by_intern, by_thread, by_thread_day: [], names: { "room-launch": "Launch week", milo: "Milo", nia: "Nia", zara: "Zara", coordinator: "Coordinator" } });
   }
   if (path === "/rooms" && req.method === "GET") return json(200, rooms.filter((r) => !r.archived_at).map((r) => ({ ...r, last_message: (messages[r.id] ?? []).slice(-1)[0] ?? null })));
   if (path === "/rooms" && req.method === "POST") {

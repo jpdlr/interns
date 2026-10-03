@@ -11,7 +11,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { Db } from "./db.js";
-import { localZone } from "./profile.js";
+import { coordinatorName, localZone } from "./profile.js";
 import { parseNextOutput, type CalAttendee, type CalEvent } from "./meetingwatch.js";
 import type { Registry } from "./registry.js";
 import type { Card, Message, Task } from "./types.js";
@@ -173,7 +173,7 @@ export function awaySummaries(tasks: Task[], nameOf: (slug: string) => string): 
 export async function buildAgenda(deps: AgendaDeps, date: string, since: string | null): Promise<AgendaResponse> {
   const { db, registry } = deps;
   const now = deps.now?.() ?? new Date();
-  const nameOf = (slug: string) => (slug === "coordinator" ? "Chaos Coordinator" : (registry.get(slug)?.name ?? slug));
+  const nameOf = (slug: string) => (slug === "coordinator" ? coordinatorName() : (registry.get(slug)?.name ?? slug));
 
   const open = db.listCards("open");
   const needs_you = open.filter(isDecision);

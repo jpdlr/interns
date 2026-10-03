@@ -1,5 +1,5 @@
 /**
- * !standup — the Chaos Coordinator's morning digest.
+ * !standup — the Coordinator's morning digest.
  *
  * Deterministic collection (db), one cheap no-tools LLM call for the summary —
  * same query() pattern as hire.ts. Falls back to the raw facts if the model
@@ -8,7 +8,7 @@
 import { plainFences } from "./fences.js";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { Db } from "./db.js";
-import { ownerName } from "./profile.js";
+import { coordinatorName, ownerName } from "./profile.js";
 
 const SPEND_DAYS = 7;
 
@@ -114,7 +114,7 @@ export async function standup(db: Db, opts: { easterEggs?: boolean; now?: Date }
     let text = "";
     for await (const message of query({
       prompt:
-        `You are the Chaos Coordinator giving ${ownerName()} the morning standup for their AI intern crew. ` +
+        `You are the ${coordinatorName()} giving ${ownerName()} the morning standup for their AI intern crew. ` +
         `Below are the raw facts from the last 24 hours. Write a tight digest (max ~10 lines, Discord ` +
         `markdown): one bullet per intern with what they actually did or found (from their recent ` +
         `reports), then anything waiting on ${ownerName()} (open cards). Dry, factual, zero fluff. If an intern ` +

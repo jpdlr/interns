@@ -29,6 +29,11 @@ export function useOwner(): OwnerSettings | null {
   return owner;
 }
 
+/** What the front desk is called on this install ("Coordinator" by default). */
+export function useCoordinatorName(): string {
+  return useOwner()?.coordinator_name || "Coordinator";
+}
+
 /** The zone schedules run in: the owner's, else this device's. */
 export function useOwnerZone(): string {
   return useOwner()?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;

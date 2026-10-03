@@ -48,6 +48,7 @@ import type { Registry } from "./registry.js";
 import type { EventBus } from "./events.js";
 import type { Attachment, CapabilityRequirement, Card, CardAction, InternManifest, Message } from "./types.js";
 import { ICONS, AVATAR_PNG_DIR } from "./icons.js";
+import { coordinatorName } from "./profile.js";
 
 interface PendingHire {
   draft: InternManifest;
@@ -405,7 +406,7 @@ export class DiscordAdapter {
       // Group chats have no channel of their own: mirror them into #office.
       if (!seen && msg.text.trim()) {
         const room = this.db.getRoom(msg.intern);
-        const who = msg.author === "coordinator" ? "Chaos Coordinator" : (this.db.getIntern(msg.speaker ?? "")?.name ?? msg.speaker ?? msg.intern);
+        const who = msg.author === "coordinator" ? coordinatorName() : (this.db.getIntern(msg.speaker ?? "")?.name ?? msg.speaker ?? msg.intern);
         await this.postToOffice(`**${who}** in _${room?.name ?? "group"}_:\n${stripRichBlocks(msg.text)}`);
       }
       return;

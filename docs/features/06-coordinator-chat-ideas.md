@@ -5,7 +5,7 @@
 - JP sometimes doesn't know, or doesn't care, which intern should handle something. He wants
   one place to say it.
 - There is no place to jot an idea down: for the app, for the business, or for later.
-- The Chaos Coordinator sits at the top of the Crew list, but tapping it opens the Inbox.
+- The Coordinator sits at the top of the Crew list, but tapping it opens the Inbox.
   Once Today replaces the Inbox (spec 03), that row is free.
 
 ## Design

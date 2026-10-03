@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/hero.svg" alt="Interns: a crew of AI agents that work for you, run by the Chaos Coordinator" width="100%">
+  <img src="docs/images/hero.svg" alt="Interns: a crew of AI agents that work for you, run by the Coordinator" width="100%">
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@ from a phone app or from Discord. They also work on their own: they triage your 
 brief you before meetings, review pull requests, keep track of who you owe a reply, and
 report back in a morning standup.
 
-Above them sits the **Chaos Coordinator**, which is deterministic code with a sense of
+Above them sits the **Coordinator**, which is deterministic code with a sense of
 humour. It hires interns from a one-line description, routes your messages to the right
 one, runs their schedules, enforces the guardrails and asks you before anything leaves
 the building. Interns never send email or publish anything themselves. They draft, and
@@ -69,7 +69,7 @@ flowchart LR
     Discord["💬 Discord (optional)"]
   end
   subgraph Box["Your machine"]
-    Coord["🎧 Chaos Coordinator<br/>orchestrator · Node + SQLite"]
+    Coord["🎧 Coordinator<br/>orchestrator · Node + SQLite"]
     Interns["🤖 Interns<br/>Claude Agent SDK sessions"]
     Tools["🧰 Tools<br/>graph-mail · graph-cal · github · pages · cards"]
   end
@@ -146,7 +146,7 @@ Open it and the setup screen walks you through the rest:
    own words. Either way you see and can edit the whole job description before anyone is
    hired.
 
-Two interns always exist: the **Chaos Coordinator** (your front desk) and **Forge** (who
+Two interns always exist: the **Coordinator** (your front desk) and **Forge** (who
 builds missing integrations, see below).
 
 > **Try it without credentials.** `cd app && npm run mock` starts a fake orchestrator with
@@ -278,6 +278,7 @@ every key. The ones you'll most likely touch:
 | Key | Default | What it does |
 | --- | --- | --- |
 | `owner_name` | `"Boss"` | What the interns call you |
+| `coordinator_name` | `"Coordinator"` | What the front desk is called |
 | `timezone` | this machine's | IANA zone for Today, local dates and calendar times |
 | `bind` / `port` | `127.0.0.1` / `7810` | Where the API and app are served |
 | `standup_cron` | `0 7 * * 1-5` | Morning standup (cron, in your `timezone`; so are interns' schedules) |

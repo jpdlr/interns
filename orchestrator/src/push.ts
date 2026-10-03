@@ -19,6 +19,7 @@ import type { Db, PushLogEntry } from "./db.js";
 import type { EventBus } from "./events.js";
 import type { Registry } from "./registry.js";
 import type { Card, Message } from "./types.js";
+import { coordinatorName } from "./profile.js";
 
 export interface PushSubscriptionJSON {
   endpoint: string;
@@ -160,9 +161,9 @@ export function wirePushNotifications(bus: EventBus, registry: Registry, push: P
   // A quiet_hours standing order holds an intern's lock-screen pings (the message/card still lands in the app).
   const internQuiet = (slug: string): boolean => (slug !== "coordinator" && !slug.startsWith("room-") ? quietNow(db, slug) : false);
   const internName = (slug: string): string =>
-    slug === "coordinator" ? "Chaos Coordinator" : (registry.get(slug)?.name ?? slug);
+    slug === "coordinator" ? coordinatorName() : (registry.get(slug)?.name ?? slug);
   const messageTitle = (msg: Message): string => {
-    const who = msg.author === "coordinator" ? "Chaos Coordinator" : internName(msg.speaker ?? msg.intern);
+    const who = msg.author === "coordinator" ? coordinatorName() : internName(msg.speaker ?? msg.intern);
     if (msg.intern.startsWith("room-")) return `${who} · ${db.getRoom(msg.intern)?.name ?? "group"}`;
     return msg.speaker && msg.speaker !== msg.intern ? `${who} · in ${internName(msg.intern)}'s thread` : who;
   };

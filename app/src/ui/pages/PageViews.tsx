@@ -17,6 +17,7 @@ import { relativeTime } from "../../time";
 import { CheckIcon, ChevronDownIcon, ExternalIcon, SearchIcon, SendIcon } from "../Icons";
 import { InternFace, resolveFaceId } from "../InternFace";
 import { Text } from "../Text";
+import { useCoordinatorName } from "../../owner";
 
 /** Send JP's request about a page (or one of its items) to the page's owner. */
 export type AskOwner = (instruction: string, item?: { id: string; label: string }) => Promise<void>;
@@ -774,8 +775,9 @@ export function DraftView({ page, ask }: { page: Page; ask: AskOwner }) {
 /** Owner line for the page header: face + name. */
 export function OwnerLine({ slug }: { slug: string }) {
   const crew = useCrew();
+  const coordinatorName = useCoordinatorName();
   const member = crew.bySlug[slug];
-  const name = slug === "coordinator" ? "Chaos Coordinator" : (member?.name ?? slug);
+  const name = slug === "coordinator" ? coordinatorName : (member?.name ?? slug);
   return (
     <View style={styles.owner}>
       <InternFace id={slug === "coordinator" ? "coordinator" : (member?.faceId ?? resolveFaceId(undefined, slug))} size={20} clipToBounds />

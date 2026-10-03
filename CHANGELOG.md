@@ -19,6 +19,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
   manifest API).
 
 ### Changed
+- **The front desk is "Coordinator"**, and its name is a setting: `coordinator_name`
+  in config (also on `GET/PATCH /owner`) sets what it's called in chats, prompts,
+  standups and notifications.
 - **Schedules run on your clock.** Intern schedules, `standup_cron` and `suggest_cron`
   are matched in your `timezone` (daylight saving included) instead of the server's
   clock. Existing installs are migrated once at startup so nothing fires at a different

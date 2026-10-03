@@ -32,6 +32,8 @@ export type MessageSurface = "app" | "discord" | "system";
 /** GET/PATCH /owner: who the crew works for, and the first-run setup state. */
 export interface OwnerSettings {
   owner_name: string;
+  /** the front desk's name ("Coordinator" unless configured) */
+  coordinator_name: string;
   /** the effective IANA zone (the server's own when none is configured) */
   timezone: string;
   timezone_configured: boolean;

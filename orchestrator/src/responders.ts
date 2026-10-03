@@ -12,12 +12,12 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { Db } from "./db.js";
 import type { Message } from "./types.js";
-import { ownerName } from "./profile.js";
+import { coordinatorName, ownerName } from "./profile.js";
 
 const RESPONDER_MODEL = "claude-haiku-4-5";
 
 const systemPrompt = () =>
-  `You are the Chaos Coordinator moderating a group chat between ${ownerName()} (the boss) and their AI interns. ` +
+  `You are the ${coordinatorName()} moderating a group chat between ${ownerName()} (the boss) and their AI interns. ` +
   `${ownerName()} just posted without addressing anyone by name. Decide which interns should reply, based on their ` +
   "roles, the standing brief, and the recent conversation. Pick the FEWEST people who can actually " +
   "answer — usually one, sometimes two; everyone only for a genuine all-hands question ('how is " +

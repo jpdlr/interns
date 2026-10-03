@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { adviseIdlePriority, type AdvisorVerdict } from "./advisor.js";
 import { localDate } from "./agenda.js";
 import { cronMatches } from "./schedules.js";
-import { ownerName } from "./profile.js";
+import { coordinatorName, ownerName } from "./profile.js";
 import { quickRepliesFence } from "./fences.js";
 import type { Config } from "./config.js";
 import { OVER_BUDGET, type Db } from "./db.js";
@@ -412,7 +412,7 @@ export class Orchestrator {
 
   private displayName(slug: string): string {
     if (slug === "jp") return ownerName();
-    if (slug === "coordinator") return "Chaos Coordinator";
+    if (slug === "coordinator") return coordinatorName();
     return this.registry.get(slug)?.name ?? slug;
   }
 
@@ -593,7 +593,7 @@ export class Orchestrator {
     return this.db
       .listMessages(thread, limit)
       .map((m) => {
-        const who = m.author === "jp" ? ownerName() : m.author === "coordinator" ? "Chaos Coordinator" : this.displayName(m.speaker ?? m.intern);
+        const who = m.author === "jp" ? ownerName() : m.author === "coordinator" ? coordinatorName() : this.displayName(m.speaker ?? m.intern);
         const files = m.attachments.length ? ` [${m.attachments.length} file${m.attachments.length === 1 ? "" : "s"} attached]` : "";
         return `[${who}]: ${m.text.replace(/\s+/g, " ").slice(0, 600)}${files}`;
       })
@@ -616,8 +616,8 @@ export class Orchestrator {
           const from = String(task.payload.from ?? "jp");
           return [
             from === "jp"
-              ? `${ownerName()} wrote in the front desk (the Chaos Coordinator's chat), and it was routed to you (${this.displayName(task.intern)}). Answer ${ownerName()} there directly.`
-              : `You (${this.displayName(task.intern)}) are in the front desk (the Chaos Coordinator's chat with ${ownerName()}); ${this.displayName(from)} mentioned you there.`,
+              ? `${ownerName()} wrote in the front desk (the ${coordinatorName()}'s chat), and it was routed to you (${this.displayName(task.intern)}). Answer ${ownerName()} there directly.`
+              : `You (${this.displayName(task.intern)}) are in the front desk (the ${coordinatorName()}'s chat with ${ownerName()}); ${this.displayName(from)} mentioned you there.`,
             `Recent conversation:`,
             this.transcript(thread),
             ``,
@@ -725,7 +725,7 @@ export class Orchestrator {
           const result = await runSuggestions({ db: this.db, registry: this.registry, home: this.suggestHome, proposeFn: this.proposeFn });
           if (this.push && result.cards.length) {
             await this.push.notify({
-              title: "Chaos Coordinator has a suggestion",
+              title: `${coordinatorName()} has a suggestion`,
               body: result.cards.map((c) => c.title).join(" · "),
               url: "/inbox",
               tag: "suggestions",

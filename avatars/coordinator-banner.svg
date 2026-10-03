@@ -37,7 +37,7 @@
   <path d="M1214 122 L1221 139 L1238 146 L1221 153 L1214 170 L1207 153 L1190 146 L1207 139 Z" fill="#f8fafc" opacity="0.9"/>
   <!-- wordmark -->
   <g font-family="Arial, Helvetica, sans-serif">
-    <text x="96" y="238" fill="#f8fafc" font-size="76" font-weight="bold" letter-spacing="1">Chaos Coordinator</text>
+    <text x="96" y="238" fill="#f8fafc" font-size="76" font-weight="bold" letter-spacing="1">Coordinator</text>
     <text x="98" y="298" fill="#9aa3b2" font-size="34" letter-spacing="6">THE INTERNS · HEAD OFFICE</text>
     <rect x="100" y="330" width="64" height="6" rx="3" fill="#8b5cf6"/>
     <rect x="172" y="330" width="24" height="6" rx="3" fill="#f59e0b"/>

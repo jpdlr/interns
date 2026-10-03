@@ -1,7 +1,7 @@
 # Architecture
 
 Interns is self-hosted and single-user: one person (the **owner**, `owner_name` in
-config) and their crew. An **orchestrator**, the Chaos Coordinator, manages a crew of
+config) and their crew. An **orchestrator**, the Coordinator, manages a crew of
 **interns**: persistent AI agents with names, animated faces, roles, their own memory and
 their own tools. You message interns directly; interns also work on their own, from
 triggers and backlogs. The phone app (Expo, installed as a PWA) and an optional Discord

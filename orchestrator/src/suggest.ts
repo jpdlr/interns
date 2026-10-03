@@ -26,7 +26,7 @@ import type { EventBus } from "./events.js";
 import { extractMentionTokens } from "./mentions.js";
 import type { Registry } from "./registry.js";
 import type { Card, CapabilityRequirement } from "./types.js";
-import { ownerName } from "./profile.js";
+import { coordinatorName, ownerName } from "./profile.js";
 
 const SUGGEST_MODEL = "claude-haiku-4-5";
 const WINDOW_DAYS = 14;
@@ -238,7 +238,7 @@ export function collectEvidence(db: Db, registry: Registry, days = WINDOW_DAYS):
 // ------------------------------------------------------------------- propose
 
 const systemPrompt = (owner = ownerName()) =>
-  "You are the Chaos Coordinator, who runs " + owner + "'s crew of AI interns. Once a week you look at what actually " +
+  "You are the " + coordinatorName() + ", who runs " + owner + "'s crew of AI interns. Once a week you look at what actually " +
   "happened and, only if the evidence is strong, propose at most two concrete improvements. Kinds: " +
   '"hire" (a new intern for a recurring need ' + owner + ' keeps handling by hand or keeps asking the wrong intern for), ' +
   '"capability" (an intern repeatedly lacked a tool/integration — name the intern and the capability), ' +

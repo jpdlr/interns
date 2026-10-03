@@ -43,6 +43,7 @@ import { QuickReplyChips, suggestQuickReplies } from "../../src/ui/QuickReplies"
 import { EmptyState, ErrorNote, Loading, Screen } from "../../src/ui/Screen";
 import { Text } from "../../src/ui/Text";
 import { ThinkingIndicator } from "../../src/ui/ThinkingIndicator";
+import { useCoordinatorName } from "../../src/owner";
 
 interface Pending {
   message: Message;
@@ -76,6 +77,7 @@ export default function ChatScreen() {
   /** pages pinned in this thread, shown beside pinned messages */
   const [pinnedPages, setPinnedPages] = useState<PageHeader[]>([]);
   const crew = useCrew();
+  const coordinatorName = useCoordinatorName();
   const [messages, setMessages] = useState<Message[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
   const [pending, setPending] = useState<Pending[]>([]);
@@ -316,13 +318,13 @@ export default function ChatScreen() {
 
   const faceId = useMemo(() => (frontDesk ? "coordinator" : resolveFaceId(intern?.icon, slug ?? "")), [frontDesk, intern?.icon, slug]);
   const memberFaces = useMemo(() => (room?.members ?? []).map((m) => crew.bySlug[m]?.faceId ?? resolveFaceId(undefined, m)), [room?.members, crew.bySlug]);
-  const threadName = isRoom ? room?.name ?? "Group" : frontDesk ? "Chaos Coordinator" : intern?.name ?? slug;
+  const threadName = isRoom ? room?.name ?? "Group" : frontDesk ? coordinatorName : intern?.name ?? slug;
   /** Faces/names per speaker for group chats and handoffs. */
   const speakerOf = useCallback(
     (message: Message) => {
       const who = message.author === "coordinator" ? "coordinator" : message.speaker ?? message.intern;
       if (message.author === "jp") return null;
-      if (who === "coordinator") return { faceId: "coordinator", name: "Chaos Coordinator", slug: "coordinator" };
+      if (who === "coordinator") return { faceId: "coordinator", name: coordinatorName, slug: "coordinator" };
       const member = crew.bySlug[who];
       return { faceId: member?.faceId ?? resolveFaceId(undefined, who), name: member?.name ?? who, slug: who };
     },
