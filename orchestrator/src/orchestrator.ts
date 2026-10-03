@@ -83,6 +83,23 @@ export function isSilentReply(text: string, strict = false): boolean {
   return /^\(?\s*(nothing|no reply|nothing to add|pass)\s*\.?\)?\.?$/i.test(t);
 }
 
+/**
+ * A background run (mail arrived, a schedule, a backlog item; nobody asked)
+ * that only says nothing happened: "Same oscillation, nothing new. No card."
+ * Dropped like "(nothing)". Short replies only; anything with substance,
+ * a block or a question is kept.
+ */
+export function isNothingToReport(text: string): boolean {
+  const t = text.trim();
+  if (t.length > 280 || /```|\?/.test(t)) return false;
+  return /\b(no card|nothing (new|here|for you|to report|to flag|to do|in it|needed|has (moved|changed))|noise|absorbed|unchanged|no change|same (oscillation|position|as (before|earlier|ten minutes ago))|already flagged)\b/i.test(t);
+}
+
+/** What a background run is told about speaking up (see isNothingToReport). */
+export const QUIET_UNLESS_NEEDED =
+  "Nobody is waiting for a reply to this run. If nothing needs the owner's attention (no decision, no action, nothing they'd want to know now), " +
+  "reply with exactly (nothing) and nothing is posted. Never post status-only notes such as \"nothing new\", \"no card\", \"noise\" or \"absorbed\".";
+
 /** intern-attach prints `[attachment:<id>]`; an intern that echoes it into prose gets it cleaned. */
 export function stripAttachmentMarkers(text: string): string {
   return text.replace(/\s*\[attachment:[0-9a-f-]{8,}\]\s*/gi, " ").replace(/[ \t]+\n/g, "\n").trim();
@@ -274,7 +291,8 @@ export class Orchestrator {
       // Pages/rules the intern created or showed during this run ride on its reply as fences.
       const announced = this.db.hasPendingAnnouncements(task.intern, startedAt);
       // "(nothing)" is never shown, in any thread — Rhea's 1:1 used to get it verbatim.
-      const silent = isSilentReply(text, !shared);
+      const silent = isSilentReply(text, !shared) || (!fromJpDirectly(task) && task.kind !== "message" && isNothingToReport(text));
+      if (silent && text.trim() && !isSilentReply(text, !shared)) console.log(`[quiet] ${task.intern}: dropped a nothing-to-report ${task.kind} reply: ${text.slice(0, 120)}`);
       if (!silent || hasOrphans || announced) {
         // A routed reply answers the message that triggered it — the thread structure inside a room.
         const replyTo = shared && typeof task.payload.reply_to === "string" ? task.payload.reply_to : null;
@@ -653,16 +671,16 @@ export class Orchestrator {
         ].join("\n");
       }
       case "backlog":
-        return `Work on this standing backlog item now and report what you did:\n${String(task.payload.item ?? "")}`;
+        return `Work on this standing backlog item now and report what you did:\n${String(task.payload.item ?? "")}\n\n${QUIET_UNLESS_NEEDED}`;
       case "scheduled": {
         const held = Array.isArray(task.payload.held) ? (task.payload.held as unknown[]).map(String) : [];
         const heldBlock =
           held.length > 0 ? `\n\nHeld since last run (${held.length}, quiet mail — skim only):\n${held.join("\n")}` : "";
-        return `Your scheduled trigger fired (${String(task.payload.cron ?? "")}). Do your routine work and report.${heldBlock}`;
+        return `Your scheduled trigger fired (${String(task.payload.cron ?? "")}). Do your routine work.${heldBlock}\n\n${QUIET_UNLESS_NEEDED}`;
       }
       case "trigger": {
         const base = `An external trigger fired: ${JSON.stringify(task.payload)}. Handle it.`;
-        if (task.payload.kind !== "meeting_brief") return base;
+        if (task.payload.kind !== "meeting_brief") return `${base}\n\n${QUIET_UNLESS_NEEDED}`;
         return (
           `${base}\n\nThis is a pre-meeting brief. Your reply IS the brief: it is filed under this meeting on ${ownerName()}'s Today ` +
           `schedule, where ${ownerName()} expands it at a glance — lead with what matters, keep it short. Do not raise a card for the ` +
