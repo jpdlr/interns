@@ -9,6 +9,7 @@ import { createReadStream, existsSync } from "node:fs";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { notFoundPage, resolvePage } from "./appshell.js";
+import { DEFAULT_STYLE, StyleSchema } from "./style.js";
 import { registerConnectorRoutes, unknownMailboxes, type ConnectorService } from "./connectors.js";
 import { z } from "zod";
 import type { ApprovalService } from "./approvals.js";
@@ -31,7 +32,7 @@ import type { Db } from "./db.js";
 import type { DiscordAdapter } from "./discord.js";
 import { INTERN_ASSIGNABLE_TOOL_NAMES, MANAGED_TOOL_NAMES, TOOL_CATALOG } from "./engine.js";
 import type { EventBus } from "./events.js";
-import { assertNameAvailable, confirmHire, hire, NameTakenError, takenNames } from "./hire.js";
+import { assertNameAvailable, confirmHire, hire, NameTakenError, takenNames, interviewCandidate, type InterviewFn } from "./hire.js";
 import { githubRepositoryAllowed, pullRequestLinks, verifyGithubWebhook, type GithubClient, type GithubReviewProposal } from "./github.js";
 import { ICONS } from "./icons.js";
 import { getNotifySettings, setNotifySettings } from "./notify.js";
@@ -166,6 +167,8 @@ function manifestResponse(slug: string, manifest: InternManifest, db: Db) {
     },
     paused: manifest.paused === true,
     notify: manifest.notify ?? "needs_you",
+    /** personality dials, 1-5 each (style.ts) */
+    style: manifest.style ?? DEFAULT_STYLE,
     /** the last two weeks of lock-screen decisions for this intern (notify.ts) */
     notify_stats: db.pushStats(slug, new Date(Date.now() - 14 * 86_400_000).toISOString()),
     /** today's limit beyond the manifest cap, and work waiting for room under it */
@@ -211,6 +214,7 @@ const ManifestPatchSchema = z
       .optional(),
     paused: z.boolean().optional(),
     notify: NotifyLevelSchema.optional(),
+    style: StyleSchema.partial().optional(),
     // null lifts a limit (every connected mailbox again)
     mailboxes: z.array(z.string()).nullable().optional(),
   })
@@ -234,6 +238,8 @@ export async function startApi(deps: {
   calendar?: CalendarSource;
   /** idea tagging call — Haiku by default; tests inject a fake */
   tagFn?: TagFn;
+  /** tests: stands in for the model in POST /hire/interview */
+  interviewFn?: InterviewFn;
   /** Connectors (Outlook sign-in, GitHub App): its routes live in connectors.ts */
   connectors?: ConnectorService;
 }): Promise<FastifyInstance> {
@@ -673,6 +679,7 @@ export async function startApi(deps: {
       ...patch,
       triggers,
       guardrails: { ...existing.guardrails, ...(patch.guardrails ?? {}) },
+      ...(patch.style ? { style: { ...DEFAULT_STYLE, ...existing.style, ...patch.style } } : {}),
     };
     if (patch.mailboxes === null) delete (merged as { mailboxes?: unknown }).mailboxes; // every mailbox again
     const parsed = InternManifestSchema.safeParse(merged);
@@ -1389,6 +1396,25 @@ export async function startApi(deps: {
     const body = z.object({ role: z.string().min(3) }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "role required" });
     return hire(body.data.role, takenNames({ db, registry }));
+  });
+
+  // Before hiring: the candidate answers a question in character (hire.ts interviewCandidate). Spend is the coordinator's.
+  app.post("/hire/interview", async (req, reply) => {
+    const body = z
+      .object({
+        draft: InternManifestSchema,
+        question: z.string().trim().min(2).max(600),
+        history: z.array(z.object({ question: z.string().max(600), answer: z.string().max(4000) })).max(6).default([]),
+      })
+      .safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "invalid interview", detail: body.error.issues });
+    try {
+      const result = await (deps.interviewFn ?? interviewCandidate)(body.data.draft, body.data.question, body.data.history);
+      db.recordSpend("coordinator", result.inputTokens, result.outputTokens, result.costUsd);
+      return { answer: result.answer };
+    } catch (err) {
+      return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   // A template is a finished draft: same candidate shape as POST /hire, no model call.

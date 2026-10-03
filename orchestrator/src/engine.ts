@@ -21,6 +21,7 @@ import { mailboxEnv, mailboxPrompt } from "./mailboxes.js";
 import { ownerName } from "./profile.js";
 import type { Registry } from "./registry.js";
 import { standingOrdersPrompt } from "./rules.js";
+import { stylePrompt } from "./style.js";
 import type { InternManifest } from "./types.js";
 
 /**
@@ -219,6 +220,7 @@ export class SdkEngine implements Engine {
     const systemPrompt = [
       manifest.system_prompt,
       manifest.persona ? `\n## Voice\n${manifest.persona}` : "",
+      stylePrompt(manifest.style),
       manifest.guardrails.drafts_only
         ? "\n## Hard rule\nAnything outbound to other humans (email, messages) is DRAFTS ONLY — never send; produce a draft and surface it for approval."
         : "",

@@ -16,6 +16,7 @@ import {
   slugify,
 } from "./types.js";
 import { coordinatorName, ownerName } from "./profile.js";
+import { stylePrompt } from "./style.js";
 
 export interface HireCandidate {
   draft: InternManifest;
@@ -42,6 +43,7 @@ Expand this into a complete intern manifest. Respond with ONLY a JSON object (no
 - "role": one-line job title
 - "icon": "default" (${ownerName()} picks the avatar later)
 - "persona": 2-3 sentences describing the intern's voice and personality
+- "style": personality dials, each an integer 1-5 where 3 is neutral: {"tone": 1 casual … 5 formal, "length": 1 brief … 5 thorough, "initiative": 1 waits to be asked … 5 takes initiative, "humour": 1 straight … 5 playful}. Fit them to the role and persona
 - "system_prompt": a thorough system prompt for the intern's working sessions (their job, boundaries, how they report back). Written in second person.
 - "tools": array chosen ONLY from this catalog: ${JSON.stringify(INTERN_ASSIGNABLE_TOOL_NAMES)} — pick the minimum the role needs
 - "triggers": object; include "cron" (5-field cron string, in ${ownerName()}'s local time) only if the role benefits from a routine, "mentions": true
@@ -50,6 +52,48 @@ Expand this into a complete intern manifest. Respond with ONLY a JSON object (no
 - "required_capabilities": array of {"id","reason"}. Use a known id when applicable: ${JSON.stringify(
   Object.keys(CAPABILITY_CATALOG),
 )}. A capability is external plumbing the role needs but the tool catalog cannot currently supply. For GitHub PR/code review work use id "github". Use a short lowercase dotted id for a genuinely new integration. Return [] when existing tools are enough.`;
+};
+
+/** A turn of the pre-hire interview. */
+export interface InterviewTurn {
+  question: string;
+  answer: string;
+}
+export type InterviewFn = (draft: InternManifest, question: string, history: InterviewTurn[]) => Promise<{ answer: string; inputTokens: number; outputTokens: number; costUsd: number }>;
+
+/**
+ * Before hiring, the owner can put a question to the candidate. One no-tools
+ * call answers in character from the draft's own system prompt, persona and
+ * style — a feel for how they'll sound, not real work.
+ */
+export const interviewCandidate: InterviewFn = async (draft, question, history) => {
+  const systemPrompt = [
+    draft.system_prompt,
+    draft.persona ? `\n## Voice\n${draft.persona}` : "",
+    stylePrompt(draft.style),
+    `\n## Right now\nYou are ${draft.name}, and ${ownerName()} is interviewing you before deciding to hire you. Answer in character, in a few sentences. ` +
+      `You have no tools or access yet: never claim to have checked, read or done anything; say how you would go about it.`,
+  ].join("");
+  const transcript = history.map((t) => `${ownerName()}: ${t.question}\n${draft.name}: ${t.answer}`).join("\n\n");
+  let answer = "";
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let costUsd = 0;
+  for await (const message of query({
+    prompt: `${transcript ? `${transcript}\n\n` : ""}${ownerName()}: ${question}`,
+    options: { systemPrompt, tools: [], allowedTools: [], permissionMode: "default", settingSources: [], maxTurns: 1 },
+  })) {
+    if (message.type === "result") {
+      for (const usage of Object.values(message.modelUsage ?? {})) {
+        inputTokens += usage.inputTokens + usage.cacheCreationInputTokens;
+        outputTokens += usage.outputTokens;
+        costUsd += usage.costUSD;
+      }
+      if (message.subtype === "success") answer = message.result;
+    }
+  }
+  if (!answer) throw new Error("the candidate didn't answer");
+  return { answer: answer.trim(), inputTokens, outputTokens, costUsd };
 };
 
 /** Strip accidental code fences and parse the first JSON object in the text. */
@@ -118,6 +162,14 @@ function withoutPendingCapabilityTools(
 function coerceManifest(raw: unknown): unknown {
   if (typeof raw !== "object" || raw === null) return raw;
   const m = { ...(raw as Record<string, unknown>) };
+  // dials: whole numbers 1-5; anything odd falls back to the middle rather than failing the hire
+  if (m.style && typeof m.style === "object") {
+    const s = m.style as Record<string, unknown>;
+    const dial = (v: unknown) => (typeof v === "number" || typeof v === "string") && Number.isFinite(Number(v)) ? Math.min(5, Math.max(1, Math.round(Number(v)))) : 3;
+    m.style = { tone: dial(s.tone), length: dial(s.length), initiative: dial(s.initiative), humour: dial(s.humour) };
+  } else {
+    delete m.style;
+  }
   if (Array.isArray(m.backlog)) {
     m.backlog = m.backlog.map((item) => {
       if (typeof item === "string") return item;

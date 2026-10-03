@@ -3,6 +3,7 @@
  * These are the single source of truth for manifest/card/message/task shapes;
  * SQLite rows and YAML files are (de)serialized through them.
  */
+import { StyleSchema } from "./style.js";
 import { z } from "zod";
 
 // ---------------------------------------------------------------- manifests
@@ -53,6 +54,8 @@ export const InternManifestSchema = z.object({
   paused: z.boolean().optional(),
   /** Outlook mailboxes this intern may use (ids from config.mailboxes); unset = all of them */
   mailboxes: z.array(z.string()).optional(),
+  /** personality dials (style.ts); unset = all in the middle */
+  style: StyleSchema.optional(),
   /** what buzzes JP's phone (push.ts); unset = "needs_you" */
   notify: NotifyLevelSchema.optional(),
 });

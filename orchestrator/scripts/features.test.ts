@@ -139,6 +139,12 @@ const app = await startApi({
   github: {} as never,
   orchestrator: orch,
   connectors: connectorService,
+  interviewFn: async (draft, question, history) => ({
+    answer: `${draft.name} (${history.length} before): ${question.endsWith("?") ? "Here is how I'd go about it." : "Noted."}`,
+    inputTokens: 120,
+    outputTokens: 30,
+    costUsd: 0.002,
+  }),
   home,
   calendar: async () => {
     if (calendarFails) throw new Error("graph-cal down");
@@ -891,6 +897,50 @@ try {
     assert.equal(briefs.body.triggers.meeting_brief, true);
     assert.equal(briefs.body.triggers.mentions, true, "other triggers untouched");
     config.mailboxes.splice(0);
+  });
+
+  // ------------------------------------------------------------ hiring
+
+  await check("style: dials become a Style block; the middle adds nothing", async () => {
+    const { stylePrompt, DEFAULT_STYLE } = await import("../src/style.js");
+    assert.equal(stylePrompt(undefined), "");
+    assert.equal(stylePrompt(DEFAULT_STYLE), "");
+    const block = stylePrompt({ tone: 1, length: 1, initiative: 5, humour: 3 });
+    assert.match(block, /^\n## Style\n- Write casually/);
+    assert.match(block, /extremely brief/);
+    assert.match(block, /highly proactive/);
+    assert.ok(!/\bwit\b|jokes|playful|serious/i.test(block), "humour at 3 adds nothing");
+  });
+
+  await check("style: manifest GET defaults to the middle, PATCH merges one dial at a time", async () => {
+    assert.deepEqual((await api("/interns/rhea/manifest")).body.style, { tone: 3, length: 3, initiative: 3, humour: 3 });
+    const one = await api("/interns/rhea/manifest", { method: "PATCH", body: { style: { length: 1 } } });
+    assert.deepEqual(one.body.style, { tone: 3, length: 1, initiative: 3, humour: 3 });
+    const two = await api("/interns/rhea/manifest", { method: "PATCH", body: { style: { humour: 5 } } });
+    assert.deepEqual(two.body.style, { tone: 3, length: 1, initiative: 3, humour: 5 });
+    assert.equal((await api("/interns/rhea/manifest", { method: "PATCH", body: { style: { tone: 9 } } })).status, 400);
+  });
+
+  await check("hire: interview a candidate before hiring; the coordinator pays", async () => {
+    const draft = InternManifestSchema.parse({ name: "Wren", role: "Researcher", system_prompt: "You research.", style: { tone: 2, length: 2, initiative: 4, humour: 3 } });
+    const before = db.spendToday("coordinator");
+    const res = await api("/hire/interview", { method: "POST", body: { draft, question: "How would you brief me before a meeting?", history: [{ question: "Hi", answer: "Hello" }] } });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.answer, "Wren (1 before): Here is how I'd go about it.");
+    const after = db.spendToday("coordinator");
+    assert.equal(after.input_tokens - before.input_tokens, 120);
+    assert.equal((await api("/hire/interview", { method: "POST", body: { draft, question: "?" } })).status, 400);
+    assert.ok(!registry.get("wren"), "an interview hires nobody");
+  });
+
+  await check("hire: confirming keeps the dials, and starters come with presets", async () => {
+    const templates = (await api("/templates")).body as { id: string }[];
+    const starter = (await api("/hire/template", { method: "POST", body: { id: templates[0]!.id } })).body;
+    assert.ok(starter.draft.style && starter.draft.style.tone >= 1, JSON.stringify(starter.draft.style));
+    const draft = { ...starter.draft, name: "Juno", style: { tone: 5, length: 4, initiative: 2, humour: 1 } };
+    const hired = await api("/hire/confirm", { method: "POST", body: { draft, icon: "face-03" } });
+    assert.equal(hired.status, 200, JSON.stringify(hired.body));
+    assert.deepEqual(registry.get(hired.body.slug)!.style, { tone: 5, length: 4, initiative: 2, humour: 1 });
   });
 
   await check("SSE streams page, rule and agenda events", async () => {
