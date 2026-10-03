@@ -209,6 +209,7 @@ export function confirmHire(
   deps.db.addMessage({
     intern: slug,
     author: "intern",
+    cause: "reply", // JP just hired them
     text:
       `Hi ${ownerName()}! I'm ${manifest.name}, your new ${manifest.role}.` +
       (manifest.persona ? ` ${manifest.persona.split(".")[0]}.` : "") +

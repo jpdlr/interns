@@ -11,10 +11,11 @@
  */
 import webpush from "web-push";
 import { NOTIFY_BODY_CHARS, NOTIFY_TITLE_CHARS, notificationText, plainText } from "./notifytext.js";
+import { cardImportance, decide, getNotifySettings, globalQuiet, levelOf, localHhmm, messageImportance, suggestQuieter, summaryText, type Importance } from "./notify.js";
 import { quietNow } from "./rules.js";
 import https from "node:https";
 import type { Config } from "./config.js";
-import type { Db } from "./db.js";
+import type { Db, PushLogEntry } from "./db.js";
 import type { EventBus } from "./events.js";
 import type { Registry } from "./registry.js";
 import type { Card, Message } from "./types.js";
@@ -30,6 +31,8 @@ export interface NotifyPayload {
   body: string;
   url: string;
   tag: string;
+  /** push_log id: the service worker reports a tap on it (POST /push/opened/:id) */
+  push_id?: string;
 }
 
 export interface PushDeliveryReport {
@@ -136,58 +139,121 @@ export class PushService {
   }
 }
 
-/** A chatty intern must not spam the lock screen: at most one message notification per intern per minute. */
+/** A chatty intern must not spam the lock screen: at most one message notification per thread per minute. */
 const MESSAGE_NOTIFY_DEBOUNCE_MS = 60_000;
 
+export interface Notifier {
+  /** Call once a minute: sends summaries at JP's summary times and when quiet hours end, and once a day looks for interns he never opens. */
+  tick(now?: Date): Promise<void>;
+  /** Send whatever is held right now as one summary (tests, and "send it now"). */
+  sendSummary(): Promise<PushLogEntry | null>;
+}
+
 /**
- * Push notifications on card + message bus events. Independent of the
+ * Push notifications on card + message bus events, through the rules in
+ * notify.ts: each one buzzes now, waits for the next summary, or stays in
+ * the app — and is logged so opens can be counted. Independent of the
  * Discord adapter (which subscribes to the same bus events for its own
- * rendering) — this never reuses or duplicates its send logic. Called once
- * from index.ts wherever the EventBus is wired up.
+ * rendering). Called once from index.ts wherever the EventBus is wired up.
  */
-export function wirePushNotifications(bus: EventBus, registry: Registry, push: PushService, db?: Pick<Db, "getRoom" | "listRules" | "recordRuleHit">): void {
+export function wirePushNotifications(bus: EventBus, registry: Registry, push: Pick<PushService, "notify">, db: Db): Notifier {
   // A quiet_hours standing order holds an intern's lock-screen pings (the message/card still lands in the app).
-  const quiet = (slug: string): boolean => (db && slug !== "coordinator" && !slug.startsWith("room-") ? quietNow(db, slug) : false);
+  const internQuiet = (slug: string): boolean => (slug !== "coordinator" && !slug.startsWith("room-") ? quietNow(db, slug) : false);
   const internName = (slug: string): string =>
     slug === "coordinator" ? "Chaos Coordinator" : (registry.get(slug)?.name ?? slug);
   const messageTitle = (msg: Message): string => {
     const who = msg.author === "coordinator" ? "Chaos Coordinator" : internName(msg.speaker ?? msg.intern);
-    if (msg.intern.startsWith("room-")) return `${who} · ${db?.getRoom(msg.intern)?.name ?? "group"}`;
+    if (msg.intern.startsWith("room-")) return `${who} · ${db.getRoom(msg.intern)?.name ?? "group"}`;
     return msg.speaker && msg.speaker !== msg.intern ? `${who} · in ${internName(msg.intern)}'s thread` : who;
   };
-  const lastMessageNotifyAt = new Map<string, number>(); // intern slug -> ms epoch
+  const lastMessageNotifyAt = new Map<string, number>(); // thread -> ms epoch
+
+  const route = (input: { intern: string; kind: "card" | "message"; ref: string; importance: Importance; title: string; body: string; url: string; tag: string; thread?: string }): void => {
+    const quiet = globalQuiet(getNotifySettings(db), new Date()) || internQuiet(input.intern);
+    const delivery = decide(levelOf(registry, input.intern), input.importance, quiet);
+    // Bursts: the first buzz of a minute in a thread stands for the rest (its tag replaces it on the lock screen anyway).
+    if (delivery === "now" && input.thread) {
+      const now = Date.now();
+      if (now - (lastMessageNotifyAt.get(input.thread) ?? 0) < MESSAGE_NOTIFY_DEBOUNCE_MS) return;
+      lastMessageNotifyAt.set(input.thread, now);
+    }
+    const entry = db.logPush({ intern: input.intern, kind: input.kind, ref: input.ref, title: input.title, body: input.body, url: input.url, delivery });
+    if (delivery !== "now") return;
+    void push
+      .notify({ title: input.title, body: input.body, url: input.url, tag: input.tag, push_id: entry.id })
+      .catch((err) => console.error(`[push] ${input.kind} notify failed:`, err));
+  };
 
   bus.on("card", (card: Card) => {
-    if (card.severity !== "urgent" && quiet(card.intern)) return;
-    void push
-      .notify({
-        title: `${internName(card.intern)}: ${plainText(card.title)}`,
-        body: card.body,
-        // /cards is also the JSON API route, so a cold browser navigation
-        // cannot use it (it has no bearer header). /inbox is a public app-only
-        // bridge that immediately replaces itself with the tab route.
-        url: `/inbox?card=${encodeURIComponent(card.id)}`,
-        tag: `card-${card.id}`,
-      })
-      .catch((err) => console.error("[push] card notify failed:", err));
+    route({
+      intern: card.intern,
+      kind: "card",
+      ref: card.id,
+      importance: cardImportance(card),
+      title: `${internName(card.intern)}: ${plainText(card.title)}`,
+      body: card.body,
+      // /cards is also the JSON API route, so a cold browser navigation
+      // cannot use it (it has no bearer header). /inbox is a public app-only
+      // bridge that immediately replaces itself with the tab route.
+      url: `/inbox?card=${encodeURIComponent(card.id)}`,
+      tag: `card-${card.id}`,
+    });
   });
 
   bus.on("message", (msg: Message) => {
     if (msg.author !== "intern" && msg.author !== "coordinator") return; // never JP's own messages
-    // The coordinator acknowledging what JP just did ("💡 Saved to Ideas", "Who should take this?") is not news.
-    if (msg.author === "coordinator" && msg.reply_to) return;
-    if (quiet(msg.speaker ?? msg.intern)) return;
-    const now = Date.now();
-    const last = lastMessageNotifyAt.get(msg.intern) ?? 0;
-    if (now - last < MESSAGE_NOTIFY_DEBOUNCE_MS) return;
-    lastMessageNotifyAt.set(msg.intern, now);
-    void push
-      .notify({
-        title: messageTitle(msg),
-        body: msg.text,
-        url: `/chat/${msg.intern}?message=${encodeURIComponent(msg.id)}`,
-        tag: `msg-${msg.intern}`,
-      })
-      .catch((err) => console.error("[push] message notify failed:", err));
+    // The coordinator acknowledging what JP just did ("💡 Saved to Ideas", "Group created") is not news,
+    // and the morning standup in its own thread has its own notification (orchestrator.runStandup).
+    if (msg.author === "coordinator" && (msg.reply_to || msg.cause === "reply" || msg.intern === "coordinator")) return;
+    route({
+      thread: msg.intern,
+      intern: msg.author === "coordinator" ? "coordinator" : (msg.speaker ?? msg.intern),
+      kind: "message",
+      ref: msg.id,
+      importance: messageImportance(msg),
+      title: messageTitle(msg),
+      body: msg.text,
+      url: `/chat/${msg.intern}?message=${encodeURIComponent(msg.id)}`,
+      tag: `msg-${msg.intern}`,
+    });
   });
+
+  const sendSummary = async (): Promise<PushLogEntry | null> => {
+    const pending = db.pendingSummary();
+    if (pending.length === 0) return null;
+    const { title, body } = summaryText(pending, internName);
+    const entry = db.logPush({ intern: "coordinator", kind: "summary", title, body, url: "/today", delivery: "now" });
+    db.markSummarized(pending.map((p) => p.id), entry.id);
+    try {
+      await push.notify({ title, body, url: "/today", tag: "summary", push_id: entry.id });
+    } catch (err) {
+      console.error("[push] summary notify failed:", err);
+    }
+    return entry;
+  };
+
+  let lastMinute = "";
+  let lastSuggestDay = "";
+  return {
+    sendSummary,
+    async tick(now = new Date()) {
+      const hhmm = localHhmm(now);
+      if (hhmm === lastMinute) return;
+      lastMinute = hhmm;
+      const settings = getNotifySettings(db);
+      // "Never" means held updates just wait in the app — no morning summary either.
+      const quietEnds = settings.quiet.enabled && hhmm === settings.quiet.to && settings.summary_times.length > 0;
+      if (quietEnds || (settings.summary_times.includes(hhmm) && !globalQuiet(settings, now))) await sendSummary();
+      // Once a day, early evening: anyone whose buzzes JP keeps ignoring?
+      const day = now.toISOString().slice(0, 10);
+      if (hhmm >= "18:00" && day !== lastSuggestDay) {
+        lastSuggestDay = day;
+        try {
+          suggestQuieter(db, registry, now);
+        } catch (err) {
+          console.error("[notify] quieter suggestions failed:", err);
+        }
+      }
+    },
+  };
 }

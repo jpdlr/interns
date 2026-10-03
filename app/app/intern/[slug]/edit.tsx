@@ -10,18 +10,18 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { nameConflict, useCrew } from "../../../src/crew";
-import { changedPatch, FALLBACK_TOOLS, formFromManifest, shortTokens, TOOL_INFO, useInternFile, wordCount, type FormState } from "../../../src/internFile";
+import { changedPatch, FALLBACK_TOOLS, formFromManifest, NOTIFY_INFO, NOTIFY_LEVELS, notifyStatsLine, shortTokens, TOOL_INFO, useInternFile, wordCount, type FormState } from "../../../src/internFile";
 import { goBack, useConfirmDiscard } from "../../../src/nav";
 import { describeMentions, useNameCarry, type ProseField } from "../../../src/rename";
 import { radius, scaledFont, space, useAppTheme } from "../../../src/theme";
 import { Group, Row, Switch } from "../../../src/ui/Grouped";
 import { Flash, GrowingInput } from "../../../src/ui/GrowingInput";
-import { TrashIcon } from "../../../src/ui/Icons";
+import { CheckIcon, TrashIcon } from "../../../src/ui/Icons";
 import { SchedulePicker } from "../../../src/ui/SchedulePicker";
 import { ErrorNote, Loading, Screen } from "../../../src/ui/Screen";
 import { Text } from "../../../src/ui/Text";
 
-type Section = "about" | "personality" | "instructions" | "schedule" | "work" | "tools" | "budget";
+type Section = "about" | "personality" | "instructions" | "schedule" | "work" | "tools" | "budget" | "notify";
 
 const TITLES: Record<Section, string> = {
   about: "Name and role",
@@ -31,6 +31,7 @@ const TITLES: Record<Section, string> = {
   work: "Standing work",
   tools: "Tools",
   budget: "Daily budget",
+  notify: "Notifications",
 };
 
 const BUDGETS = [50_000, 100_000, 200_000, 500_000, 1_000_000];
@@ -247,6 +248,27 @@ export default function InternEditor() {
             </Group>
           ) : null}
 
+          {section === "notify" ? (
+            <Group
+              title={`What reaches your phone from ${name}`}
+              footer={[notifyStatsLine(manifest?.notify_stats), "Urgent problems always come through. Summary times and quiet hours are in Settings."].filter(Boolean).join(". ")}
+            >
+              {NOTIFY_LEVELS.map((level) => {
+                const on = form.notify === level;
+                return (
+                  <Row
+                    key={level}
+                    label={NOTIFY_INFO[level].label}
+                    detail={NOTIFY_INFO[level].detail}
+                    onPress={() => update({ notify: level })}
+                    accessibilityLabel={`${NOTIFY_INFO[level].label}${on ? ", selected" : ""}`}
+                    right={<View style={styles.check}>{on ? <CheckIcon size={20} color={colors.accent} /> : null}</View>}
+                  />
+                );
+              })}
+            </Group>
+          ) : null}
+
           {section === "budget" ? (
             <Field label="Tokens per day" note={capError ?? `Work stops for the day once ${name} has used this much. Today: ${shortTokens((manifest?.spend_today.input_tokens ?? 0) + (manifest?.spend_today.output_tokens ?? 0))}.`} noteColor={capError ? colors.urgent : undefined}>
               <View style={styles.presets}>
@@ -287,6 +309,7 @@ function Field({ label, note, noteColor, children }: { label: string; note?: str
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   bold: { fontWeight: "600" },
+  check: { width: 24, alignItems: "center" },
   body: { padding: space.lg, gap: space.xl },
   headerButton: { paddingHorizontal: space.md, height: 36, justifyContent: "center" },
   field: { gap: space.sm },

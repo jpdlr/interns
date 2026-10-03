@@ -5,7 +5,7 @@
  */
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
-import { ApiError, type InternManifestDetail, type InternManifestPatch, type MetaResponse } from "./api";
+import { ApiError, type InternManifestDetail, type InternManifestPatch, type MetaResponse, type NotifyLevel } from "./api";
 import { useSettings } from "./settings";
 
 /** Used only if GET /meta fails — mirrors orchestrator/src/engine.ts TOOL_CATALOG keys. */
@@ -26,6 +26,26 @@ export const TOOL_INFO: Record<string, { label: string; detail: string }> = {
   "integration.build": { label: "Build integrations", detail: "Forge's build tooling" },
 };
 
+/** The notification levels in JP's words, quietest last. */
+export const NOTIFY_INFO: Record<NotifyLevel, { label: string; detail: string }> = {
+  all: { label: "Everything", detail: "Every message and card buzzes straight away." },
+  needs_you: { label: "When they need you", detail: "Replies to you, questions and decisions buzz. Updates they post on their own wait for your summary." },
+  summary: { label: "Summary only", detail: "Nothing buzzes on its own; it all comes in your summary." },
+  off: { label: "Nothing", detail: "No notifications. It's all still here in the app." },
+};
+export const NOTIFY_LEVELS: NotifyLevel[] = ["all", "needs_you", "summary", "off"];
+
+/** "Last 2 weeks: 12 buzzes, you opened 3 · 8 in summaries" */
+export function notifyStatsLine(stats: InternManifestDetail["notify_stats"]): string | undefined {
+  if (!stats || stats.now + stats.summary + stats.off === 0) return undefined;
+  const parts = [
+    stats.now ? `${stats.now} buzz${stats.now === 1 ? "" : "es"}, you opened ${stats.opened}` : null,
+    stats.summary ? `${stats.summary} in summaries` : null,
+    stats.off ? `${stats.off} left in the app` : null,
+  ].filter(Boolean);
+  return `Last 2 weeks: ${parts.join(" · ")}`;
+}
+
 export interface FormState {
   name: string;
   role: string;
@@ -39,6 +59,7 @@ export interface FormState {
   backlog: string[];
   daily_token_cap: string;
   drafts_only: boolean;
+  notify: NotifyLevel;
 }
 
 export function formFromManifest(m: InternManifestDetail): FormState {
@@ -55,6 +76,7 @@ export function formFromManifest(m: InternManifestDetail): FormState {
     backlog: [...m.backlog],
     daily_token_cap: String(m.guardrails.daily_token_cap),
     drafts_only: m.guardrails.drafts_only,
+    notify: m.notify ?? "needs_you",
   };
 }
 
@@ -76,6 +98,7 @@ export function buildPatch(form: FormState): InternManifestPatch {
       drafts_only: form.drafts_only,
       daily_token_cap: Number(form.daily_token_cap),
     },
+    notify: form.notify,
   };
 }
 
@@ -89,7 +112,7 @@ export function changedPatch(initial: FormState, form: FormState): InternManifes
   const after = buildPatch(form);
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   const out: InternManifestPatch = {};
-  for (const key of ["name", "role", "persona", "system_prompt", "icon", "tools", "backlog"] as const) {
+  for (const key of ["name", "role", "persona", "system_prompt", "icon", "tools", "backlog", "notify"] as const) {
     if (!same(before[key], after[key])) Object.assign(out, { [key]: after[key] });
   }
   const triggers = Object.fromEntries(Object.entries(after.triggers ?? {}).filter(([k, v]) => !same(before.triggers?.[k as keyof typeof before.triggers], v)));

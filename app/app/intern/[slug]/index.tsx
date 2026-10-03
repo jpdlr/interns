@@ -13,7 +13,7 @@ import { Alert, Platform, Pressable, ScrollView, StyleSheet, View } from "react-
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { InternManifestDetail, InternManifestPatch, InternWeek } from "../../../src/api";
 import { FACE_IDS } from "../../../src/faces.generated";
-import { shortTokens, TOOL_INFO, useInternFile, wordCount } from "../../../src/internFile";
+import { NOTIFY_INFO, notifyStatsLine, shortTokens, TOOL_INFO, useInternFile, wordCount } from "../../../src/internFile";
 import { describeCron } from "../../../src/schedule";
 import { useSettings } from "../../../src/settings";
 import { radius, space, useAppTheme } from "../../../src/theme";
@@ -27,7 +27,7 @@ import { EmptyState, ErrorNote, Loading, Screen } from "../../../src/ui/Screen";
 import { InternPages, StandingOrders } from "../../../src/ui/StandingOrders";
 import { Text } from "../../../src/ui/Text";
 
-type Section = "about" | "personality" | "instructions" | "schedule" | "work" | "tools" | "budget";
+type Section = "about" | "personality" | "instructions" | "schedule" | "work" | "tools" | "budget" | "notify";
 
 export default function InternProfile() {
   const { colors } = useAppTheme();
@@ -208,6 +208,10 @@ export default function InternProfile() {
             right={<Switch label="Wake on new mail" disabled={!hasMail && !manifest.triggers.mail_push} value={manifest.triggers.mail_push ?? false} onChange={(v) => void quickSave((m) => ({ ...m, triggers: { ...m.triggers, mail_push: v } }), { triggers: { mail_push: v } })} />}
           />
           <Row label="Standing work" value={manifest.backlog.length ? `${manifest.backlog.length} item${manifest.backlog.length === 1 ? "" : "s"}` : "None"} onPress={() => open("work")} />
+        </Group>
+
+        <Group title="Notifications" footer={notifyStatsLine(manifest.notify_stats)}>
+          <Row label="On your phone" value={NOTIFY_INFO[manifest.notify ?? "needs_you"].label} onPress={() => open("notify")} />
         </Group>
 
         <Group title="What they can use">

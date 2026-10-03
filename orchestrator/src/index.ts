@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   // the owner approves a capability build.
   capabilities.ensureBuilder();
   const github = new GithubClient(config.github);
-  const approvals = new ApprovalService(db, capabilities, github);
+  const approvals = new ApprovalService(db, capabilities, github, registry);
   const githubwatch = new GithubWatcher(db, registry, config, github);
   const discord = new DiscordAdapter(db, registry, bus, config, approvals, capabilities);
   const mailwatch = new MailWatcher(db, registry, config, { home });
@@ -64,7 +64,9 @@ async function main(): Promise<void> {
     orchestrator,
     home,
   });
-  wirePushNotifications(bus, registry, push, db);
+  const notifier = wirePushNotifications(bus, registry, push, db);
+  // summaries at JP's summary times / when quiet hours end; daily "you never open these" check
+  setInterval(() => void notifier.tick().catch((err) => console.error("[notify] tick failed:", err)), 20_000);
   orchestrator.start();
   mailwatch.start();
   meetingwatch.start();

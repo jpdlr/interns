@@ -26,7 +26,8 @@ const { Registry } = await import("../src/registry.js");
 const { Orchestrator, isSilentReply } = await import("../src/orchestrator.js");
 const { InternManifestSchema } = await import("../src/types.js");
 const { DiscordAdapter } = await import("../src/discord.js");
-const { PushService } = await import("../src/push.js");
+const { PushService, wirePushNotifications } = await import("../src/push.js");
+const notifyRules = await import("../src/notify.js");
 const { startApi } = await import("../src/api.js");
 const { CapabilityService } = await import("../src/capabilities.js");
 const { ApprovalService } = await import("../src/approvals.js");
@@ -117,7 +118,7 @@ const app = await startApi({
   config,
   discord,
   push: new PushService(db, config),
-  approvals: new ApprovalService(db, new CapabilityService(db, registry, config, home), {} as never),
+  approvals: new ApprovalService(db, new CapabilityService(db, registry, config, home), {} as never, registry),
   capabilities: new CapabilityService(db, registry, config, home),
   github: {} as never,
   orchestrator: orch,
@@ -736,6 +737,117 @@ try {
     assert.ok(week.done >= 4);
     assert.ok(week.tokens > 0 && week.days.at(-1).tokens === db.spendToday("rhea").input_tokens + db.spendToday("rhea").output_tokens);
     assert.equal((await api("/interns/nobody/week")).status, 404);
+  });
+
+  // ------------------------------------------------------- notifications
+
+  await check("notifications: level × importance × quiet", () => {
+    const { decide } = notifyRules;
+    assert.equal(decide("needs_you", "needs_you", false), "now");
+    assert.equal(decide("needs_you", "fyi", false), "summary");
+    assert.equal(decide("needs_you", "needs_you", true), "summary", "quiet hours hold it");
+    assert.equal(decide("all", "fyi", false), "now");
+    assert.equal(decide("summary", "needs_you", false), "summary");
+    assert.equal(decide("off", "needs_you", false), "off");
+    assert.equal(decide("off", "urgent", true), "now", "urgent always gets through");
+  });
+
+  await check("notifications: replies and decisions buzz, the rest waits for one summary that learns from opens", async () => {
+    const sent: { title: string; body: string; push_id?: string; tag: string }[] = [];
+    const notifier = wirePushNotifications(bus, registry, { notify: async (p) => (sent.push(p), {} as never) }, db);
+    notifyRules.setNotifySettings(db, { quiet: { enabled: false } });
+    await notifier.sendSummary(); // clear anything earlier checks queued
+    sent.length = 0;
+
+    assert.equal((await api("/interns/tessa/manifest")).body.notify, "needs_you", "the default");
+    db.addMessage({ intern: "tessa", author: "intern", speaker: "tessa", text: "Pipeline updated overnight.", surface: "system", cause: "work" });
+    db.addMessage({ intern: "rhea", author: "intern", speaker: "rhea", text: "Done — the PR is approved.", surface: "system", cause: "reply" });
+    db.createCard({ intern: "tessa", title: "Send the BioAxis reply?", body: "Draft is ready.", severity: "action", actions: [{ id: "ok", label: "OK", style: "primary", kind: "button" }] });
+    db.createCard({ intern: "ingrid", title: "Three new expos listed", body: "FYI", severity: "info" });
+    assert.deepEqual(sent.map((p) => p.title), ["Rhea", "Tessa: Send the BioAxis reply?"]);
+    assert.ok(sent.every((p) => p.push_id), "every buzz carries its log id");
+
+    // everything / nothing
+    await api("/interns/ingrid/manifest", { method: "PATCH", body: { notify: "all" } });
+    db.addMessage({ intern: "ingrid", author: "intern", speaker: "ingrid", text: "Found another one.", surface: "system", cause: "work" });
+    await api("/interns/ingrid/manifest", { method: "PATCH", body: { notify: "off" } });
+    db.addMessage({ intern: "ingrid", author: "intern", speaker: "ingrid", text: "And one more.", surface: "system", cause: "reply" });
+    db.createCard({ intern: "ingrid", title: "Server down", body: "!", severity: "urgent" });
+    assert.deepEqual(sent.slice(2).map((p) => p.title), ["Ingrid", "Ingrid: Server down"]);
+
+    // quiet hours: a reply waits, urgent doesn't
+    notifyRules.setNotifySettings(db, { quiet: { enabled: true, from: "00:00", to: "23:59" } });
+    db.addMessage({ intern: "rhea", author: "intern", speaker: "rhea", text: "Late answer.", surface: "system", cause: "reply" });
+    assert.equal(sent.length, 4);
+    notifyRules.setNotifySettings(db, { quiet: { enabled: false } });
+
+    // one summary for everything held
+    const summary = await notifier.sendSummary();
+    const last = sent.at(-1)!;
+    assert.equal(last.title, "3 updates from the crew");
+    assert.match(last.body, /Tessa: Pipeline updated overnight\./);
+    assert.match(last.body, /Ingrid: Three new expos listed/);
+    assert.match(last.body, /Rhea: Late answer\./);
+    assert.equal(await notifier.sendSummary(), null, "nothing held twice");
+
+    // the service worker reports a tap without the token; a summary tap counts for its items
+    const opened = await api(`/push/opened/${summary!.id}`, { method: "POST", auth: false });
+    assert.equal(opened.status, 200, JSON.stringify(opened.body));
+    assert.equal(opened.body.ok, true);
+    assert.equal((await api("/push/opened/not-a-uuid", { method: "POST", auth: false })).status, 401);
+    const stats = (await api("/interns/rhea/manifest")).body.notify_stats;
+    assert.equal(stats.now, 1);
+    assert.equal(stats.summary, 1);
+    await api("/interns/ingrid/manifest", { method: "PATCH", body: { notify: "needs_you" } });
+  });
+
+  await check("notifications: the summary goes out at summary times and when quiet hours end — not with \"Never\"", async () => {
+    const sent: { title: string }[] = [];
+    const notifier = wirePushNotifications(bus, registry, { notify: async (p) => (sent.push(p), {} as never) }, db);
+    notifyRules.setNotifySettings(db, { summary_times: ["12:30"], quiet: { enabled: true, from: "22:00", to: "07:00" } });
+    const held = () => db.logPush({ intern: "tessa", kind: "message", title: "Tessa", body: "FYI", url: "/", delivery: "summary" });
+    await notifier.sendSummary();
+    sent.length = 0;
+    held();
+    await notifier.tick(new Date("2026-10-05T10:29:00Z")); // 12:29 SAST
+    assert.equal(sent.length, 0);
+    await notifier.tick(new Date("2026-10-05T10:30:00Z")); // 12:30 SAST
+    assert.equal(sent.length, 1);
+    held();
+    await notifier.tick(new Date("2026-10-06T05:00:00Z")); // 07:00 SAST, quiet hours over
+    assert.equal(sent.length, 2);
+    notifyRules.setNotifySettings(db, { summary_times: [] });
+    held();
+    await notifier.tick(new Date("2026-10-07T05:00:00Z"));
+    assert.equal(sent.length, 2, "never: held updates wait in the app");
+    notifyRules.setNotifySettings(db, { summary_times: ["12:30", "17:30"] });
+  });
+
+  await check("notifications: never opened → suggest the summary, and teach them to message less", async () => {
+    for (let i = 0; i < 6; i++) db.logPush({ intern: "julia-x", kind: "message", title: "x", body: "x", url: "/", delivery: "now" });
+    hire("julia-x", "Julia", "Tester");
+    for (let i = 0; i < 7; i++) db.logPush({ intern: "julia-x", kind: "message", title: "Julia", body: "Morning!", url: "/", delivery: "now" });
+    const opened = db.logPush({ intern: "julia-x", kind: "message", title: "Julia", body: "Hi", url: "/", delivery: "now" });
+    db.markPushOpened(opened.id);
+    const cards = notifyRules.suggestQuieter(db, registry);
+    assert.equal(cards.length, 1, JSON.stringify(cards.map((c) => c.title)));
+    assert.equal(cards[0]!.title, "You rarely open Julia's notifications");
+    assert.match(cards[0]!.body, /buzzed your phone 14 times in the last two weeks and you opened 1/);
+    assert.equal(notifyRules.suggestQuieter(db, registry).length, 0, "once a month at most");
+
+    const res = await api(`/cards/${cards[0]!.id}/actions/summary_teach`, { method: "POST", body: {} });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(registry.get("julia-x")!.notify, "summary");
+    assert.ok(db.listRules("julia-x").some((r) => r.text === notifyRules.MESSAGE_LESS_GUIDANCE), "she is told to message less");
+  });
+
+  await check("notifications: settings", async () => {
+    const bad = await api("/notify/settings", { method: "PATCH", body: { summary_times: ["25:00"] } });
+    assert.equal(bad.status, 400);
+    const ok = await api("/notify/settings", { method: "PATCH", body: { summary_times: ["17:30", "08:30"], quiet: { enabled: true, from: "21:00", to: "07:00" } } });
+    assert.deepEqual(ok.body, { summary_times: ["08:30", "17:30"], quiet: { enabled: true, from: "21:00", to: "07:00" } });
+    assert.deepEqual((await api("/notify/settings")).body, ok.body);
+    assert.equal((await api("/notify/settings", { auth: false })).status, 401);
   });
 
   await check("SSE streams page, rule and agenda events", async () => {

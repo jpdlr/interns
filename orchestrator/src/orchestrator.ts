@@ -302,7 +302,9 @@ export class Orchestrator {
         const id = randomUUID();
         const fences = this.db.claimAnnouncements(task.intern, startedAt, id);
         const body = [silent ? "" : text, ...fences.map((f) => f.fence)].filter(Boolean).join("\n\n");
-        const message = this.db.addMessage({ id, intern: thread, author: "intern", speaker: task.intern, reply_to: replyTo, text: body, surface: "system" });
+        // Why they spoke decides whether it buzzes now or waits for JP's summary (notify.ts).
+        const cause = /```quick-replies\b/.test(body) ? "ask" : fromJpDirectly(task) ? "reply" : "work";
+        const message = this.db.addMessage({ id, intern: thread, author: "intern", speaker: task.intern, reply_to: replyTo, text: body, surface: "system", cause });
         if (isRoomKey(thread)) this.db.touchRoom(thread);
         for (const f of fences) {
           // A page first shown somewhere other than its owner's thread is listed with that thread too.

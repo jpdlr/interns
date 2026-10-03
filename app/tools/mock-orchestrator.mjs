@@ -25,7 +25,7 @@ const TYPES = {
 };
 
 /** Routes the API owns. Note /cards is both an API route and an app route. */
-const API_PATHS = /^\/(interns|tasks|cards|activity|hire|events|meta|push|github|attachments|rooms|reports|suggest|messages|pages|rules|agenda|ideas)(\/|$)/;
+const API_PATHS = /^\/(notify|interns|tasks|cards|activity|hire|events|meta|push|github|attachments|rooms|reports|suggest|messages|pages|rules|agenda|ideas)(\/|$)/;
 const isApiPath = (path) => API_PATHS.test(path);
 
 /** An asset as-is, else the route's own page (as the orchestrator does), else Expo's not-found page. */
@@ -168,6 +168,8 @@ const manifests = {
     guardrails: { drafts_only: true, daily_token_cap: 50000 },
     paused: false,
     budget: { extra_today: 0, held: 0 },
+    notify: "all",
+    notify_stats: { now: 23, opened: 3, summary: 0, off: 0 },
     spend_today: { input_tokens: 31230, output_tokens: 10000, cost_usd: 0.42 },
     discord: { channel_id: "1187654321098765432" },
   },
@@ -184,6 +186,8 @@ const manifests = {
     guardrails: { drafts_only: true, daily_token_cap: 100000 },
     paused: false,
     budget: { extra_today: 0, held: 0 },
+    notify: "needs_you",
+    notify_stats: { now: 4, opened: 3, summary: 9, off: 0 },
     spend_today: { input_tokens: 6100, output_tokens: 2000, cost_usd: 0.09 },
     discord: { channel_id: "1187654321098765433" },
   },
@@ -197,10 +201,14 @@ const manifests = {
     guardrails: { drafts_only: true, daily_token_cap: 30000 },
     paused: true,
     budget: { extra_today: 0, held: 0 },
+    notify: "summary",
+    notify_stats: { now: 0, opened: 0, summary: 2, off: 0 },
     spend_today: { input_tokens: 0, output_tokens: 0, cost_usd: 0 },
     discord: { channel_id: null },
   },
 };
+
+const notifySettings = { summary_times: ["12:30", "17:30"], quiet: { enabled: true, from: "22:00", to: "07:00" } };
 
 const ICON_CATALOG = Array.from({ length: 20 }, (_, i) => {
   const id = `face-${String(i + 1).padStart(2, "0")}`;
@@ -278,7 +286,7 @@ const server = http.createServer((req, res) => {
     });
   }
 
-  if (path === "/interns" && req.method === "GET") return json(200, interns.map((i) => ({ ...i, on_pause: manifests[i.slug]?.paused === true })));
+  if (path === "/interns" && req.method === "GET") return json(200, interns.map((i) => ({ ...i, on_pause: manifests[i.slug]?.paused === true, notify: manifests[i.slug]?.notify ?? "needs_you" })));
   if (path === "/suggest/run" && req.method === "POST") {
     const card = { id: `c-sugg-${Date.now()}`, intern: "coordinator", title: "Hire: An invoice chaser", severity: "info", state: "open",
       body: "**What I noticed**\nYou asked Milo about supplier invoices 6 times in two weeks, and twice he had to hand it back.\n\n**Suggestion**\nHire an intern who owns supplier follow-ups end to end and reports weekly.\n\n_Role to draft:_ someone who chases supplier invoices and payment status",
@@ -458,6 +466,22 @@ const server = http.createServer((req, res) => {
         emit("message", reply);
       }, Number(process.env.REPLY_DELAY_MS ?? 1200));
     });
+  }
+
+  // Lock-screen settings: summary times and quiet hours.
+  if (path === "/notify/settings") {
+    if (req.method === "GET") return json(200, notifySettings);
+    if (req.method === "PATCH") {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        const patch = JSON.parse(raw || "{}");
+        if (patch.summary_times) notifySettings.summary_times = [...patch.summary_times].sort();
+        if (patch.quiet) notifySettings.quiet = { ...notifySettings.quiet, ...patch.quiet };
+        json(200, notifySettings);
+      });
+      return;
+    }
   }
 
   // An intern's last seven days (the profile's "This week").

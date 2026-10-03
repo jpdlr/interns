@@ -114,7 +114,7 @@ self.addEventListener("push", (event) => {
     renotify: Boolean(payload.tag),
     icon: "/icon-192.png",
     badge: "/icon-192.png",
-    data: { url: payload.url || "/" },
+    data: { url: payload.url || "/", pushId: payload.push_id || null },
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });
@@ -123,6 +123,10 @@ self.addEventListener("push", (event) => {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const url = (event.notification.data && event.notification.data.url) || "/";
+  // Tell the orchestrator this one was opened: notifications JP never opens
+  // teach it to send that intern to the summary instead (orchestrator notify.ts).
+  const pushId = event.notification.data && event.notification.data.pushId;
+  if (pushId) event.waitUntil(fetch(`/push/opened/${encodeURIComponent(pushId)}`, { method: "POST" }).catch(() => {}));
   event.waitUntil(
     (async () => {
       const requested = new URL(url, self.location.origin);

@@ -25,6 +25,16 @@ export const GuardrailsSchema = z.object({
   daily_token_cap: z.number().int().positive().default(200_000),
 });
 
+/**
+ * How much of an intern reaches JP's lock screen:
+ *  all       — every message and card, straight away
+ *  needs_you — replies to JP, questions and decisions now; the rest in the next summary
+ *  summary   — everything in the summary (urgent still buzzes)
+ *  off       — nothing (still in the app; urgent still buzzes)
+ */
+export const NotifyLevelSchema = z.enum(["all", "needs_you", "summary", "off"]);
+export type NotifyLevel = z.infer<typeof NotifyLevelSchema>;
+
 export const InternManifestSchema = z.object({
   name: z.string().min(1),
   role: z.string().min(1),
@@ -41,6 +51,8 @@ export const InternManifestSchema = z.object({
   guardrails: GuardrailsSchema.default({ drafts_only: true, daily_token_cap: 200_000 }),
   /** JP paused them: no schedule, backlog, mail, meetings, reviews or routing; direct messages still reach them */
   paused: z.boolean().optional(),
+  /** what buzzes JP's phone (push.ts); unset = "needs_you" */
+  notify: NotifyLevelSchema.optional(),
 });
 export type InternManifest = z.infer<typeof InternManifestSchema>;
 export type Triggers = z.infer<typeof TriggersSchema>;
@@ -202,6 +214,8 @@ export const MessageSchema = z.object({
   ts: z.string(), // ISO 8601
   surface: z.enum(["app", "discord", "system"]),
   attachments: z.array(AttachmentSchema).default([]),
+  /** why an intern spoke: answering JP ("reply"), asking him something ("ask"), or on its own ("work") — drives notifications */
+  cause: z.enum(["reply", "ask", "work"]).nullable().default(null),
 });
 
 // -------------------------------------------------------------------- rooms

@@ -405,6 +405,7 @@ export class MeetingWatcher {
         speaker: brief.intern,
         text: `How did **${subject}** go?${outsiders.length ? ` (with ${outsiders.join(", ")})` : ""}\n\n${quickRepliesFence(DEBRIEF_OPTIONS)}`,
         surface: "system",
+        cause: "ask",
       });
       this.db.createDebrief({ event_id: brief.event_id, intern: brief.intern, message_id: message.id, event: brief.event });
       this.db.notifyAgenda(localDate(new Date(brief.start_at)));

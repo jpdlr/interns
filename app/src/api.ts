@@ -42,6 +42,7 @@ export interface Intern {
   paused: number;
   /** JP paused the intern itself: no automatic work */
   on_pause?: boolean;
+  notify?: NotifyLevel;
   activity: TaskActivity | null;
   spend_today: number;
   cost_today_usd: number;
@@ -230,8 +231,27 @@ export interface InternManifestDetail {
   paused?: boolean;
   /** tokens JP allowed on top of the cap today, and tasks waiting for room under it */
   budget?: { extra_today: number; held: number };
+  /** what reaches JP's lock screen from them */
+  notify?: NotifyLevel;
+  /** the last two weeks: buzzed now (and how many he opened), held for summaries, left in the app */
+  notify_stats?: { now: number; opened: number; summary: number; off: number };
   spend_today: { input_tokens: number; output_tokens: number; cost_usd: number };
   discord: { channel_id: string | null };
+}
+
+/**
+ * How much of an intern reaches the lock screen (orchestrator notify.ts):
+ * all — everything at once; needs_you — replies, questions and decisions at
+ * once, the rest in the summary; summary — all in the summary; off — nothing.
+ * Urgent always comes through.
+ */
+export type NotifyLevel = "all" | "needs_you" | "summary" | "off";
+
+/** GET/PATCH /notify/settings */
+export interface NotifySettings {
+  /** local "HH:MM" */
+  summary_times: string[];
+  quiet: { enabled: boolean; from: string; to: string };
 }
 
 /** GET /interns/:slug/week — the profile's "This week". */
@@ -259,7 +279,7 @@ export interface InternWeek {
 export type InternManifestPatch = Partial<
   Pick<
     InternManifestDetail,
-    "name" | "role" | "icon" | "persona" | "system_prompt" | "tools" | "triggers" | "backlog" | "guardrails" | "paused"
+    "name" | "role" | "icon" | "persona" | "system_prompt" | "tools" | "triggers" | "backlog" | "guardrails" | "paused" | "notify"
   >
 >;
 
@@ -800,6 +820,15 @@ export class InternsApi {
       method: "PATCH",
       body: JSON.stringify(patch),
     });
+  }
+
+  /** Summary times and quiet hours for the lock screen. */
+  getNotifySettings(): Promise<NotifySettings> {
+    return this.request<NotifySettings>("/notify/settings");
+  }
+
+  patchNotifySettings(patch: { summary_times?: string[]; quiet?: Partial<NotifySettings["quiet"]> }): Promise<NotifySettings> {
+    return this.request<NotifySettings>("/notify/settings", { method: "PATCH", body: JSON.stringify(patch) });
   }
 
   /** What the intern did over the last seven days. */

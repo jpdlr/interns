@@ -3,10 +3,11 @@
  * the bundle: the same build works against localhost during development and
  * a Tailscale address from the phone.
  */
-import { useRouter, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
-import { ApiError, createApi } from "../../src/api";
+import { ApiError, createApi, type Intern, type NotifySettings } from "../../src/api";
+import { NOTIFY_INFO } from "../../src/internFile";
 import { friendlyError } from "../../src/errors";
 import { useLive } from "../../src/live";
 import { usePushNotifications } from "../../src/push";
@@ -15,7 +16,8 @@ import { radius, scaledFont, space, useAppTheme, type TextSize, type ThemeMode }
 import { Button } from "../../src/ui/Button";
 import { ConnectionPill } from "../../src/ui/ConnectionPill";
 import { Group, Row, Segmented, Switch } from "../../src/ui/Grouped";
-import { Screen, ScreenTitle } from "../../src/ui/Screen";
+import { CheckIcon } from "../../src/ui/Icons";
+import { ErrorNote, Screen, ScreenTitle } from "../../src/ui/Screen";
 import { Text } from "../../src/ui/Text";
 
 type TestState =
@@ -275,6 +277,7 @@ export default function SettingsScreen() {
         </Group>
 
         <PushGroup push={pushNotifications} />
+        {configured ? <NotifyPrefs /> : null}
 
         <Group title="Crew" footer={suggestNote ?? undefined}>
           <Row label="Spend" detail="What the crew costs, per intern and per conversation" onPress={() => router.push("/spend" as never)} />
@@ -293,6 +296,102 @@ export default function SettingsScreen() {
         </Group>
       </ScrollView>
     </Screen>
+  );
+}
+
+const SUMMARY_PRESETS: { times: string[]; label: string }[] = [
+  { times: ["12:30", "17:30"], label: "Lunch and end of day" },
+  { times: ["17:30"], label: "End of day" },
+  { times: ["08:30", "12:30", "17:30"], label: "Morning, lunch and end of day" },
+  { times: [], label: "Never — I'll check the app" },
+];
+
+/**
+ * When held updates arrive (summaries), quiet hours, and each intern's level
+ * (orchestrator notify.ts). Each intern's row opens their notification editor.
+ */
+function NotifyPrefs() {
+  const { colors } = useAppTheme();
+  const { api } = useSettings();
+  const router = useRouter();
+  const [settings, setSettings] = useState<NotifySettings | null>(null);
+  const [crew, setCrew] = useState<Intern[]>([]);
+  const [choosing, setChoosing] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      let live = true;
+      Promise.all([api.getNotifySettings(), api.listInterns()]).then(
+        ([s, interns]) => live && (setSettings(s), setCrew(interns)),
+        (e) => live && setError(e),
+      );
+      return () => {
+        live = false;
+      };
+    }, [api]),
+  );
+
+  const save = async (patch: Parameters<typeof api.patchNotifySettings>[0], optimistic: NotifySettings) => {
+    const before = settings;
+    setSettings(optimistic);
+    setError(null);
+    try {
+      setSettings(await api.patchNotifySettings(patch));
+    } catch (e) {
+      setSettings(before);
+      setError(e);
+    }
+  };
+
+  if (!settings) return error ? <ErrorNote error={error} subject="notification settings" /> : null;
+  const preset = SUMMARY_PRESETS.find((p) => p.times.join() === [...settings.summary_times].sort().join());
+  const summaryLabel = preset?.label ?? settings.summary_times.join(", ");
+  return (
+    <>
+      <Group title="Summaries" footer="Updates that don't need you right away are collected and sent as one notification.">
+        <Row label="Send a summary" value={choosing ? "Done" : summaryLabel} onPress={() => setChoosing((v) => !v)} />
+        {choosing
+          ? SUMMARY_PRESETS.map((p) => {
+              const on = p === preset;
+              return (
+                <Row
+                  key={p.label}
+                  label={p.label}
+                  detail={p.times.length ? p.times.join(" · ") : "Held updates just wait in the app"}
+                  onPress={() => void save({ summary_times: p.times }, { ...settings, summary_times: p.times })}
+                  accessibilityLabel={`${p.label}${on ? ", selected" : ""}`}
+                  right={<View style={styles.check}>{on ? <CheckIcon size={20} color={colors.accent} /> : null}</View>}
+                />
+              );
+            })
+          : null}
+        <Row
+          label="Quiet hours"
+          detail={`${settings.quiet.from}–${settings.quiet.to}: only urgent problems buzz; the rest arrives as one summary at ${settings.quiet.to}.`}
+          right={
+            <Switch
+              label="Quiet hours"
+              value={settings.quiet.enabled}
+              onChange={(enabled) => void save({ quiet: { enabled } }, { ...settings, quiet: { ...settings.quiet, enabled } })}
+            />
+          }
+        />
+      </Group>
+      {error ? <ErrorNote error={error} onDismiss={() => setError(null)} /> : null}
+      {crew.length ? (
+        <Group title="From each intern" footer="When they need you: replies, questions and decisions buzz; everything else waits for your summary.">
+          {crew.map((intern) => (
+            <Row
+              key={intern.slug}
+              label={intern.name}
+              value={NOTIFY_INFO[intern.notify ?? "needs_you"].label}
+              onPress={() => router.push(`/intern/${intern.slug}/edit?section=notify` as never)}
+            />
+          ))}
+        </Group>
+      ) : null}
+    </>
   );
 }
 
@@ -408,6 +507,7 @@ const styles = StyleSheet.create({
   body: { paddingHorizontal: space.lg, paddingTop: space.lg, paddingBottom: space.xxl, gap: space.xl },
   editor: { padding: space.lg, gap: space.md },
   inset: { paddingHorizontal: space.lg, paddingBottom: space.md, gap: 2 },
+  check: { width: 24, alignItems: "center" },
   field: { gap: space.xs },
   input: {
     borderWidth: StyleSheet.hairlineWidth,

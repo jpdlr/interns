@@ -46,6 +46,22 @@ import {
 
 /** The passive "I've read it" action every information card can be resolved with. */
 export const SEEN_ACTION: CardAction = { id: "seen", label: "Seen", style: "primary", kind: "button" };
+export type PushLogKind = "card" | "message" | "summary";
+export type PushDelivery = "now" | "summary" | "off";
+export interface PushLogEntry {
+  id: string;
+  ts: string;
+  intern: string;
+  kind: PushLogKind;
+  ref: string | null;
+  title: string;
+  body: string;
+  url: string;
+  delivery: PushDelivery;
+  summary_id: string | null;
+  opened_at: string | null;
+}
+
 /** Task error that marks work set aside at the daily token limit (status paused). */
 export const OVER_BUDGET = "over daily budget";
 
@@ -328,6 +344,27 @@ const MIGRATIONS: string[] = [
     updated_at TEXT NOT NULL
   );
   `,
+  // Notifications: why a message was sent, and every lock-screen decision —
+  // buzzed now, held for the summary, or left in the app — and whether JP
+  // opened it (push.ts). Opens are what the "you never open these" nudge learns from.
+  `
+  ALTER TABLE messages ADD COLUMN cause TEXT;
+  CREATE TABLE IF NOT EXISTS push_log (
+    id TEXT PRIMARY KEY,
+    ts TEXT NOT NULL,
+    intern TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('card','message','summary')),
+    ref TEXT,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    url TEXT NOT NULL,
+    delivery TEXT NOT NULL CHECK (delivery IN ('now','summary','off')),
+    summary_id TEXT,
+    opened_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_push_log_intern ON push_log(intern, ts);
+  CREATE INDEX IF NOT EXISTS idx_push_log_pending ON push_log(delivery, summary_id);
+  `,
 ];
 
 interface PageRow {
@@ -580,7 +617,7 @@ export class Db {
    * surfaces can render them without a second fetch.
    */
   addMessage(
-    input: Omit<Message, "id" | "ts" | "attachments" | "speaker" | "reply_to" | "pinned"> & { id?: string; ts?: string; speaker?: string | null; reply_to?: string | null; attachmentIds?: string[] },
+    input: Omit<Message, "id" | "ts" | "attachments" | "speaker" | "reply_to" | "pinned" | "cause"> & { id?: string; ts?: string; speaker?: string | null; reply_to?: string | null; cause?: Message["cause"]; attachmentIds?: string[] },
   ): Message {
     const { attachmentIds = [], ...rest } = input;
     // A caller may pick the id up front so things that belong to the message
@@ -588,8 +625,8 @@ export class Db {
     const id = rest.id ?? randomUUID();
     const ts = rest.ts ?? nowIso();
     this.sqlite
-      .prepare("INSERT INTO messages (id, intern, author, speaker, reply_to, text, ts, surface) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(id, rest.intern, rest.author, rest.speaker ?? null, rest.reply_to ?? null, rest.text, ts, rest.surface);
+      .prepare("INSERT INTO messages (id, intern, author, speaker, reply_to, text, ts, surface, cause) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(id, rest.intern, rest.author, rest.speaker ?? null, rest.reply_to ?? null, rest.text, ts, rest.surface, rest.cause ?? null);
     if (attachmentIds.length) this.linkAttachments(rest.intern, attachmentIds, id);
     const msg = this.getMessage(id)!;
     this.bus.emit("message", msg);
@@ -1568,6 +1605,49 @@ export class Db {
     const due = holds.filter((h) => h.until <= today && !keep(h.intern));
     if (due.length) this.setKv("holds", JSON.stringify(holds.filter((h) => !due.includes(h))));
     return due;
+  }
+
+  // -------------------------------------------------------- notifications
+
+  logPush(entry: { intern: string; kind: PushLogKind; ref?: string | null; title: string; body: string; url: string; delivery: PushDelivery }): PushLogEntry {
+    const row: PushLogEntry = { id: randomUUID(), ts: nowIso(), ref: entry.ref ?? null, summary_id: null, opened_at: null, ...entry };
+    this.sqlite
+      .prepare("INSERT INTO push_log (id, ts, intern, kind, ref, title, body, url, delivery) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(row.id, row.ts, row.intern, row.kind, row.ref, row.title, row.body, row.url, row.delivery);
+    return row;
+  }
+
+  /** Held for the next summary and not yet in one, oldest first. */
+  pendingSummary(): PushLogEntry[] {
+    return this.sqlite.prepare("SELECT * FROM push_log WHERE delivery = 'summary' AND summary_id IS NULL ORDER BY ts ASC").all() as PushLogEntry[];
+  }
+
+  markSummarized(ids: string[], summaryId: string): void {
+    const stmt = this.sqlite.prepare("UPDATE push_log SET summary_id = ? WHERE id = ?");
+    this.sqlite.transaction(() => ids.forEach((id) => stmt.run(summaryId, id)))();
+  }
+
+  /** JP tapped a notification (the service worker reports it). Opening a summary counts for everything in it. */
+  markPushOpened(id: string): boolean {
+    const now = nowIso();
+    const hit = this.sqlite.prepare("UPDATE push_log SET opened_at = COALESCE(opened_at, ?) WHERE id = ?").run(now, id).changes > 0;
+    if (hit) this.sqlite.prepare("UPDATE push_log SET opened_at = COALESCE(opened_at, ?) WHERE summary_id = ?").run(now, id);
+    return hit;
+  }
+
+  /** What reached JP from one intern since a moment: buzzed now (and opened), held for summaries, left in the app. */
+  pushStats(intern: string, sinceIso: string): { now: number; opened: number; summary: number; off: number } {
+    const row = this.sqlite
+      .prepare(
+        `SELECT
+           SUM(delivery = 'now') AS now,
+           SUM(delivery = 'now' AND opened_at IS NOT NULL) AS opened,
+           SUM(delivery = 'summary') AS summary,
+           SUM(delivery = 'off') AS off
+         FROM push_log WHERE intern = ? AND kind != 'summary' AND ts >= ?`,
+      )
+      .get(intern, sinceIso) as { now: number | null; opened: number | null; summary: number | null; off: number | null };
+    return { now: row.now ?? 0, opened: row.opened ?? 0, summary: row.summary ?? 0, off: row.off ?? 0 };
   }
 
   // ------------------------------------------------------------------ kv

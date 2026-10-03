@@ -31,6 +31,7 @@ import type { EventBus } from "./events.js";
 import { assertNameAvailable, confirmHire, hire, NameTakenError, takenNames } from "./hire.js";
 import { githubRepositoryAllowed, pullRequestLinks, verifyGithubWebhook, type GithubClient, type GithubReviewProposal } from "./github.js";
 import { ICONS } from "./icons.js";
+import { getNotifySettings, setNotifySettings } from "./notify.js";
 import type { PushService } from "./push.js";
 import type { Registry } from "./registry.js";
 import type { Orchestrator } from "./orchestrator.js";
@@ -46,6 +47,7 @@ import {
   CardStateSchema,
   InternManifest,
   InternManifestSchema,
+  NotifyLevelSchema,
   PageKindSchema,
   RuleTypeSchema,
   type Rule,
@@ -157,6 +159,9 @@ function manifestResponse(slug: string, manifest: InternManifest, db: Db) {
       daily_token_cap: manifest.guardrails.daily_token_cap,
     },
     paused: manifest.paused === true,
+    notify: manifest.notify ?? "needs_you",
+    /** the last two weeks of lock-screen decisions for this intern (notify.ts) */
+    notify_stats: db.pushStats(slug, new Date(Date.now() - 14 * 86_400_000).toISOString()),
     /** today's limit beyond the manifest cap, and work waiting for room under it */
     budget: {
       extra_today: db.budgetExtra(slug),
@@ -198,6 +203,7 @@ const ManifestPatchSchema = z
       })
       .optional(),
     paused: z.boolean().optional(),
+    notify: NotifyLevelSchema.optional(),
   })
   .strict();
 
@@ -239,7 +245,7 @@ export async function startApi(deps: {
   await app.register(cors, { origin: true });
 
   /** Paths that are API (bearer-token gated); everything else is the static app shell. */
-  const API_PREFIXES = ["/interns", "/tasks", "/cards", "/activity", "/hire", "/events", "/meta", "/push", "/capabilities", "/github", "/webhooks", "/attachments", "/rooms", "/reports", "/suggest", "/messages", "/pages", "/rules", "/agenda", "/ideas"];
+  const API_PREFIXES = ["/interns", "/tasks", "/cards", "/activity", "/hire", "/events", "/meta", "/push", "/capabilities", "/github", "/webhooks", "/attachments", "/rooms", "/reports", "/suggest", "/messages", "/pages", "/rules", "/agenda", "/ideas", "/notify"];
   /** A thread key is an intern slug, a live room id, or the coordinator's front desk. */
   const threadExists = (key: string) => key === "coordinator" || Boolean(registry.get(key)) || Boolean(db.getRoom(key)?.archived_at === null);
   const isApiPath = (url: string) => API_PREFIXES.some((p) => url === p || url.startsWith(`${p}/`) || url.startsWith(`${p}?`));
@@ -264,6 +270,8 @@ export async function startApi(deps: {
     const page = navigationPage(req);
     if (page) return reply.type("text/html").sendFile(page);
     if (req.url.startsWith("/webhooks/github")) return; // authenticated by X-Hub-Signature-256 below
+    // The service worker reports a tapped notification without the app's token; the id is an unguessable UUID and it only sets opened_at.
+    if (req.method === "POST" && /^\/push\/opened\/[0-9a-f-]{36}$/.test(req.url)) return;
     const auth = req.headers.authorization ?? "";
     if (auth === `Bearer ${config.api_token}`) return;
     // <img src> / <a download> cannot send headers: a GET for attachment bytes
@@ -292,6 +300,7 @@ export async function startApi(deps: {
         paused: db.countTasks(slug, "paused"),
         /** JP paused the intern itself (not a task) */
         on_pause: manifest.paused === true,
+        notify: manifest.notify ?? "needs_you",
         activity: current ? taskActivity(current) : null,
         spend_today: spend.input_tokens + spend.output_tokens,
         cost_today_usd: spend.cost_usd,
@@ -389,6 +398,7 @@ export async function startApi(deps: {
       author: "coordinator",
       text: `Group created: **${room.name}** with ${room.members.map((m) => registry.get(m)?.name ?? m).join(", ")}. Mention someone with @Name to bring them in; with no mention everyone may answer.`,
       surface: "system",
+      cause: "reply", // echoes JP's own action: not a notification
     });
     return reply.code(201).send(room);
   });
@@ -677,6 +687,24 @@ export async function startApi(deps: {
 
     return manifestResponse(slug, manifest, db);
   });
+
+  /** Lock-screen policy: summary times and quiet hours (notify.ts). */
+  app.get("/notify/settings", async () => getNotifySettings(db));
+  app.patch("/notify/settings", async (req, reply) => {
+    const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+    const body = z
+      .object({
+        summary_times: z.array(hhmm).max(6).optional(),
+        quiet: z.object({ enabled: z.boolean().optional(), from: hhmm.optional(), to: hhmm.optional() }).optional(),
+      })
+      .strict()
+      .safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: "invalid notification settings", detail: body.error.issues });
+    return setNotifySettings(db, body.data);
+  });
+
+  /** The service worker: JP tapped this notification. */
+  app.post<{ Params: { id: string } }>("/push/opened/:id", async (req) => ({ ok: db.markPushOpened(req.params.id) }));
 
   /**
    * An intern's last seven days for their profile: what they got done (the

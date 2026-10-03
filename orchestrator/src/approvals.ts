@@ -2,6 +2,8 @@
 import type { CapabilityService } from "./capabilities.js";
 import type { Db } from "./db.js";
 import type { GithubClient, GithubReviewProposal } from "./github.js";
+import { applyQuieterAnswer } from "./notify.js";
+import type { Registry } from "./registry.js";
 import { RetryableApprovalError } from "./errors.js";
 import { todayUtc, type Card, type CardResolution } from "./types.js";
 
@@ -10,6 +12,8 @@ export class ApprovalService {
     private db: Db,
     private capabilities: CapabilityService,
     private github: Pick<GithubClient, "publishReview">,
+    /** for answers that change an intern (notification level) */
+    private registry?: Registry,
   ) {}
 
   async handle(cardId: string, actionId: string, resolution: CardResolution): Promise<Card> {
@@ -20,6 +24,7 @@ export class ApprovalService {
 
     if (actionId === "reject") this.capabilities.rejectForCard(card.id);
     if (card.context.kind === "budget" && actionId === "extend") return this.extendBudget(card, resolution);
+    if (card.context.kind === "notify_suggest" && this.registry) applyQuieterAnswer(this.db, this.registry, card, actionId);
     const job = this.db.getApprovalJob(card.id, action.id);
     if (!job) return this.db.resolveCard(card.id, resolution)!;
     if (job.status === "done") return this.db.resolveCard(card.id, resolution)!;
