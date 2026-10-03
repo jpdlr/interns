@@ -82,9 +82,11 @@ export default function CrewScreen() {
   const router = useRouter();
 
   // First run: no token yet, or a fresh orchestrator with nobody hired.
-  // An older orchestrator without /owner just keeps the Crew tab.
+  // An older orchestrator without /owner just keeps the Crew tab. Only when
+  // the Crew tab is what's on screen: a deep link to another screen (e.g.
+  // /connectors/outlook) mounts the tabs underneath and must not be bounced.
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !focused) return;
     if (!configured) {
       router.replace("/setup" as never);
       return;
@@ -97,7 +99,7 @@ export default function CrewScreen() {
     return () => {
       cancelled = true;
     };
-  }, [api, configured, ready, router]);
+  }, [api, configured, focused, ready, router]);
   const { archived } = useLocalSearchParams<{ archived?: string }>();
 
   const [interns, setInterns] = useState<Intern[]>([]);
