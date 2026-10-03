@@ -5,6 +5,22 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **A new hiring screen.** Describe the job, pick a starter from a card grid, or start from
+  scratch. You then build the candidate:
+  - a face picked from a strip, with the name and role edited in place;
+  - personality dials with a live sample reply;
+  - the job, schedule and triggers;
+  - tools as tiles with real logos;
+  - budget, drafts-only and notifications.
+
+  A short welcome plays when you hire.
+- **Personality dials** (`style` in the manifest): tone, length, initiative and humour,
+  1–5 each. Moved dials add a "Style" block to the intern's prompt. The hire model sets
+  them, the starters carry presets, and the dials can be changed on the profile.
+- **Interview before hiring** (`POST /hire/interview`): put a question to a candidate and
+  hear them answer in character. Nobody is hired; the coordinator pays for the call.
+
 ## [0.1.0] - 2026-10-03
 
 The first public release, with a [28-second demo film](docs/media/interns-promo.mp4).
