@@ -126,6 +126,8 @@ function itemLabel(page: Page, item: Record<string, unknown>): { label: string; 
       const keys = columns.filter((c) => !c.icon).map((c) => c.key);
       return { label: str(item[keys[0] ?? "id"]), detail: keys.slice(1, 4).map((k) => str(item[k])).filter(Boolean).join(" · ") };
     }
+    case "moodboard":
+      return { label: str(item.title) || str(item.source) || str(item.url), detail: [str(item.source), str(item.note)].filter(Boolean).join(" · ").slice(0, 160) };
     default:
       return { label: str(item.text), detail: Array.isArray(item.tags) ? (item.tags as string[]).join(" · ") : "" };
   }

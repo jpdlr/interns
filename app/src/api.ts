@@ -544,7 +544,7 @@ export interface SpendReport {
 // ------------------------------------------------------------------ pages
 // docs/features/contracts.md §2 — living views an intern keeps up to date.
 
-export type PageKind = "people" | "board" | "table" | "list" | "draft";
+export type PageKind = "people" | "board" | "table" | "list" | "draft" | "moodboard";
 
 export interface Person {
   id: string;
@@ -577,6 +577,25 @@ export interface BoardData {
 export interface TableData {
   columns: { key: string; title: string; icon?: boolean }[];
   rows: ({ id: string } & Record<string, string | number | null>)[];
+}
+/** A visual reference on a moodboard: a link, an image, or both. */
+export interface MoodboardItem {
+  id: string;
+  title?: string;
+  note?: string;
+  url?: string;
+  /** "media:<name>" or an https URL; the app shows `image_url` */
+  image?: string;
+  /** app-relative signed URL (or https) to show the image */
+  image_url?: string;
+  source?: string;
+  tags: string[];
+  by?: "owner" | "intern";
+  ts?: string;
+  preview?: "none";
+}
+export interface MoodboardData {
+  items: MoodboardItem[];
 }
 export interface ListItem {
   id: string;
@@ -1221,6 +1240,19 @@ export class InternsApi {
   /** JP's own edits are limited to ticking list items; everything else goes through the owner. */
   patchPageItem(id: string, itemId: string, set: Record<string, unknown>): Promise<Page> {
     return this.request<Page>(`/pages/${encodeURIComponent(id)}/items/${encodeURIComponent(itemId)}`, { method: "PATCH", body: JSON.stringify({ set }) });
+  }
+
+  addPageItem(id: string, item: Record<string, unknown>): Promise<Page> {
+    return this.request<Page>(`/pages/${encodeURIComponent(id)}/items`, { method: "POST", body: JSON.stringify({ item }) });
+  }
+
+  /** A pasted or picked image for a moodboard; returns its "media:" ref to put on an item. */
+  uploadPageImage(id: string, file: UploadableFile): Promise<{ image: string; url: string }> {
+    return this.request(`/pages/${encodeURIComponent(id)}/media`, {
+      method: "POST",
+      body: file.data as BodyInit,
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+    });
   }
 
   removePageItem(id: string, itemId: string): Promise<Page> {

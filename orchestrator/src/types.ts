@@ -277,7 +277,7 @@ export type TaskStatus = z.infer<typeof TaskStatusSchema>;
  * chat (docs/features/02-pages.md). The intern owns the facts; JP changes a
  * page by talking to its owner. `data` is validated per kind on every write.
  */
-export const PageKindSchema = z.enum(["people", "board", "table", "list", "draft"]);
+export const PageKindSchema = z.enum(["people", "board", "table", "list", "draft", "moodboard"]);
 export type PageKind = z.infer<typeof PageKindSchema>;
 
 const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}/, "date as YYYY-MM-DD");
@@ -318,11 +318,57 @@ export const BoardDataSchema = z
   })
   .refine((b) => b.items.every((i) => b.columns.some((c) => c.id === i.column)), "every item.column must be a column id");
 
-export const TableDataSchema = z
-  .object({
+/**
+ * Tables take "rows", but every other kind calls its list "items", and
+ * columns are easy to label rather than title: accept both, so rows can't
+ * silently vanish (zod drops unknown keys).
+ */
+export const TableDataSchema = z.preprocess(
+  (raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+    const t = { ...(raw as Record<string, unknown>) };
+    if (t.rows === undefined && Array.isArray(t.items)) {
+      t.rows = t.items;
+      delete t.items;
+    }
+    if (Array.isArray(t.columns)) {
+      t.columns = t.columns.map((c) => (c && typeof c === "object" && !("title" in c) && "label" in c ? { ...c, title: (c as { label: unknown }).label } : c));
+    }
+    return t;
+  },
+  z.object({
     columns: z.array(z.object({ key: z.string().min(1), title: z.string().min(1), icon: z.boolean().optional() })).min(1),
     rows: z.array(z.object({ id: itemId }).catchall(z.union([z.string(), z.number(), z.null()]))).default([]),
-  });
+  }),
+);
+
+/**
+ * A moodboard: visual references on a board. Each item has a link, an
+ * image, or both; links get a preview image fetched (pagemedia.ts). `image`
+ * is "media:<name>" (stored with the page) or an https URL.
+ */
+export const MoodboardDataSchema = z.object({
+  items: z
+    .array(
+      z
+        .object({
+          id: itemId,
+          title: z.string().max(200).optional(),
+          note: z.string().max(2000).optional(),
+          url: z.string().regex(/^https?:\/\//, "url must be http(s)").optional(),
+          image: z.string().regex(/^(media:[A-Za-z0-9_.-]+|https:\/\/.+)$/, "image is media:<name> or an https URL").optional(),
+          source: z.string().max(120).optional(),
+          tags: z.array(z.string()).default([]),
+          /** who put it on the board */
+          by: z.enum(["owner", "intern"]).optional(),
+          ts: z.string().optional(),
+          /** "none": the link had no preview image */
+          preview: z.enum(["none"]).optional(),
+        })
+        .refine((i) => i.title || i.url || i.image || i.note, "an item needs a title, link, image or note"),
+    )
+    .default([]),
+});
 
 export const ListDataSchema = z.object({
   items: z
@@ -361,6 +407,7 @@ export const PAGE_DATA_SCHEMAS = {
   table: TableDataSchema,
   list: ListDataSchema,
   draft: DraftDataSchema,
+  moodboard: MoodboardDataSchema,
 } as const;
 
 /** The array inside `data` that holds a kind's items (null: the kind has no items). */
@@ -370,6 +417,7 @@ export const PAGE_ITEM_FIELD: Record<PageKind, "people" | "items" | "rows" | nul
   table: "rows",
   list: "items",
   draft: null,
+  moodboard: "items",
 };
 
 export const PageSchema = z.object({

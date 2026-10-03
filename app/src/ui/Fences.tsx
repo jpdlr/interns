@@ -21,7 +21,7 @@ import { useSettings } from "../settings";
 import { radius, space, useAppTheme } from "../theme";
 import { relativeTime } from "../time";
 import { usePage } from "../usePage";
-import { BoardIcon, CheckIcon, ChevronRightIcon, ListIcon, MailIcon, PinIcon, TableIcon, UsersIcon } from "./Icons";
+import { BoardIcon, CheckIcon, ChevronRightIcon, ImageIcon, ListIcon, MailIcon, PinIcon, TableIcon, UsersIcon } from "./Icons";
 import { useMessageContext } from "./MessageContext";
 import { Text } from "./Text";
 
@@ -44,6 +44,8 @@ export function PageKindIcon({ kind, size = 18, color }: { kind: PageKind | stri
       return <TableIcon size={size} color={color} />;
     case "draft":
       return <MailIcon size={size} color={color} />;
+    case "moodboard":
+      return <ImageIcon size={size} color={color} />;
     default:
       return <ListIcon size={size} color={color} />;
   }

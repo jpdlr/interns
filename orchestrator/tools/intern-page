@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * intern-page — keep a living page JP opens from the chat (people, board,
- * table, list, draft). See docs/features/02-pages.md and contracts.md §2.
+ * table, list, draft, moodboard). See docs/features/02-pages.md and contracts.md §2.
  *
  * A page is created once and then updated in place: every write bumps its
  * version, and the app shows JP "N changes since you looked". A newly
@@ -25,6 +25,9 @@
  *   table   {"columns":[{"key","title","icon?":true}],"rows":[{"id", <key>: value, …}]}
  *   list    {"items":[{"id","text","done?","tags":[],"ts"}]}
  *   draft   the JSON graph-mail draft / revise-draft prints (pass it straight through with --data-file)
+ *   moodboard {"items":[{"id","title?","note?","url?","image_path?","source?","tags":[]}]}
+ *           visual references as image cards. A link gets its preview image fetched; image_path copies a
+ *           local image (a shared photo, a downloaded post) onto the board. Each item needs a title, url, image or note.
  *
  * All output is JSON on stdout; errors are {"error": "..."} with a nonzero exit.
  */
@@ -32,7 +35,7 @@ const fs = process.getBuiltinModule("node:fs");
 const os = process.getBuiltinModule("node:os");
 const path = process.getBuiltinModule("node:path");
 
-const KINDS = ["people", "board", "table", "list", "draft"];
+const KINDS = ["people", "board", "table", "list", "draft", "moodboard"];
 const BOOLEAN_FLAGS = new Set(["no-show", "show"]);
 
 function out(obj) {

@@ -13,6 +13,7 @@ import { DEFAULT_STYLE, StyleSchema } from "./style.js";
 import { learnedView, ownerSetStyle, reactTo, ReactionError, undoStyleChange } from "./reactions.js";
 import { registerConnectorRoutes, unknownMailboxes, type ConnectorService } from "./connectors.js";
 import { registerPhotosRoutes, type GooglePhotos } from "./photos.js";
+import { fillPreviews, ingestImagePath, MediaError, readMedia, saveMedia, mediaUrl, signMedia, withMediaUrls } from "./pagemedia.js";
 import { z } from "zod";
 import type { ApprovalService } from "./approvals.js";
 import {
@@ -58,6 +59,7 @@ import {
   REACTIONS,
   ReactionSchema,
   RuleTypeSchema,
+  type Page,
   type Rule,
   type Task,
 } from "./types.js";
@@ -303,6 +305,13 @@ export async function startApi(deps: {
       const parsed = new URL(req.url, "http://localhost");
       const id = decodeURIComponent(parsed.pathname.slice("/attachments/".length));
       if (verifyAttachmentSig(config.api_token, id, parsed.searchParams.get("sig") ?? undefined)) return;
+    }
+    // Moodboard images, signed per page and file (pagemedia.ts).
+    const media = req.method === "GET" ? /^\/pages\/([^/]+)\/media\/([^/?]+)/.exec(req.url) : null;
+    if (media) {
+      const sig = new URL(req.url, "http://localhost").searchParams.get("sig") ?? "";
+      const expected = signMedia(config.api_token, decodeURIComponent(media[1]!), decodeURIComponent(media[2]!));
+      if (sig.length === expected.length && sig === expected) return;
     }
     return reply.code(401).send({ error: "unauthorized" });
   });
@@ -832,6 +841,25 @@ export async function startApi(deps: {
     throw err;
   };
 
+  // ---- moodboards: images live with the page; links get preview images (pagemedia.ts)
+  const mediaHome = deps.home ?? internsHome();
+  const pageView = (page: Page) => withMediaUrls(page, config.api_token);
+  const ingestItems = (pageId: string, data: unknown) => {
+    const d = data as { items?: unknown };
+    if (!d || typeof d !== "object" || !Array.isArray(d.items)) return data;
+    return { ...d, items: d.items.map((i) => (i && typeof i === "object" ? ingestImagePath(mediaHome, pageId, i as Record<string, unknown>) : i)) };
+  };
+  /** Fetch previews for new links in the background; the page event updates the app. */
+  const afterMoodboardWrite = (page: Page, created = false): Page => {
+    if (created) {
+      // image_path on create: the page id didn't exist before, so copy now
+      const withImages = ingestItems(page.id, page.data);
+      if (withImages !== page.data) page = db.updatePage(page.id, { data: validatePageData("moodboard", withImages) }) ?? page;
+    }
+    void fillPreviews(db, home, page.id).catch(() => {});
+    return page;
+  };
+
   app.post("/pages", async (req, reply) => {
     const body = z
       .object({
@@ -849,9 +877,10 @@ export async function startApi(deps: {
     try {
       const data = validatePageData(body.data.kind, body.data.data);
       const thread = body.data.thread_key && threadExists(body.data.thread_key) ? body.data.thread_key : body.data.intern;
-      const page = db.createPage({ intern: body.data.intern, thread_key: thread, kind: body.data.kind, title: body.data.title, summary: body.data.summary, data });
+      let page = db.createPage({ intern: body.data.intern, thread_key: thread, kind: body.data.kind, title: body.data.title, summary: body.data.summary, data });
+      if (page.kind === "moodboard") page = afterMoodboardWrite(page, true);
       if (body.data.announce) announcePage(db, page);
-      return reply.code(201).send(page);
+      return reply.code(201).send(pageView(page));
     } catch (err) {
       return pageErr(reply, err);
     }
@@ -866,7 +895,30 @@ export async function startApi(deps: {
   app.get<{ Params: { id: string } }>("/pages/:id", async (req, reply) => {
     const page = db.getPage(req.params.id);
     if (!page) return reply.code(404).send({ error: "no such page" });
-    return page;
+    return pageView(page);
+  });
+
+  /** Paste or pick an image for a moodboard: stored with the page; returns its "media:" ref. */
+  app.post<{ Params: { id: string } }>("/pages/:id/media", async (req, reply) => {
+    const page = db.getPage(req.params.id);
+    if (!page) return reply.code(404).send({ error: "no such page" });
+    if (page.kind !== "moodboard") return reply.code(400).send({ error: "only moodboards take images" });
+    const raw = req.body;
+    const bytes = Buffer.isBuffer(raw) ? raw : null;
+    if (!bytes?.length) return reply.code(400).send({ error: "empty body" });
+    try {
+      const name = saveMedia(mediaHome, page.id, bytes);
+      return reply.code(201).send({ image: `media:${name}`, url: mediaUrl(config.api_token, page.id, name) });
+    } catch (err) {
+      if (err instanceof MediaError) return reply.code(err.status).send({ error: err.message });
+      throw err;
+    }
+  });
+
+  app.get<{ Params: { id: string; name: string } }>("/pages/:id/media/:name", async (req, reply) => {
+    const media = readMedia(mediaHome, req.params.id, req.params.name);
+    if (!media) return reply.code(404).send({ error: "no such image" });
+    return reply.header("Content-Type", media.type).header("Cache-Control", "private, max-age=31536000, immutable").send(media.bytes);
   });
 
   app.get<{ Params: { key: string }; Querystring: { archived?: string } }>("/interns/:key/pages", async (req, reply) => {
@@ -882,8 +934,10 @@ export async function startApi(deps: {
       .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "invalid page update", detail: body.error.issues });
     try {
-      const data = body.data.data === undefined ? undefined : validatePageData(page.kind, body.data.data);
-      return db.updatePage(page.id, { title: body.data.title, summary: body.data.summary, data });
+      const incoming = page.kind === "moodboard" && body.data.data !== undefined ? ingestItems(page.id, body.data.data) : body.data.data;
+      const data = incoming === undefined ? undefined : validatePageData(page.kind, incoming);
+      const updated = db.updatePage(page.id, { title: body.data.title, summary: body.data.summary, data })!;
+      return pageView(page.kind === "moodboard" ? afterMoodboardWrite(updated) : updated);
     } catch (err) {
       return pageErr(reply, err);
     }
@@ -895,7 +949,9 @@ export async function startApi(deps: {
     const body = z.object({ item: z.record(z.string(), z.unknown()) }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "item required" });
     try {
-      return addItem(db, page, body.data.item);
+      const item = page.kind === "moodboard" ? ingestImagePath(mediaHome, page.id, body.data.item) : body.data.item;
+      const updated = addItem(db, page, item);
+      return pageView(page.kind === "moodboard" ? afterMoodboardWrite(updated) : updated);
     } catch (err) {
       return pageErr(reply, err);
     }
@@ -907,7 +963,9 @@ export async function startApi(deps: {
     const body = z.object({ set: z.record(z.string(), z.unknown()) }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "set required" });
     try {
-      return patchItem(db, page, req.params.itemId, body.data.set);
+      const set = page.kind === "moodboard" ? ingestImagePath(mediaHome, page.id, body.data.set) : body.data.set;
+      const updated = patchItem(db, page, req.params.itemId, set);
+      return pageView(page.kind === "moodboard" ? afterMoodboardWrite(updated) : updated);
     } catch (err) {
       return pageErr(reply, err);
     }
@@ -917,7 +975,7 @@ export async function startApi(deps: {
     const page = db.getPage(req.params.id);
     if (!page) return reply.code(404).send({ error: "no such page" });
     try {
-      return removeItem(db, page, req.params.itemId);
+      return pageView(removeItem(db, page, req.params.itemId));
     } catch (err) {
       return pageErr(reply, err);
     }

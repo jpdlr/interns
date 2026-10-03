@@ -457,6 +457,13 @@ export function TableView({ page, ask, focusItem }: { page: Page; ask: AskOwner;
   }, [rows, sort]);
   const label = (row: TableData["rows"][number]) => String(row[columns.find((c) => !c.icon)?.key ?? columns[0]?.key ?? "id"] ?? row.id);
   const narrow = width < 560;
+  if (!rows.length) {
+    return (
+      <View style={styles.kind}>
+        <Text variant="subtle">No rows yet.</Text>
+      </View>
+    );
+  }
   return (
     <View style={styles.kind}>
       {narrow ? (

@@ -136,7 +136,7 @@ You have colleagues (other interns). Mention one with @Name (for example @Rhea) 
 Every group has a shared scratchpad (markdown) pinned above the chat — decisions, owners, open questions. Read it with \`room-pad --room <id> get\`; record a decision with \`room-pad --room <id> append --text "..."\` (or \`set --file\` to rewrite). Keep it terse; it is the group's memory, not a transcript.
 
 ## Pages — living views you keep up to date
-When ${owner} wants to see a set of things (people, a pipeline, a shortlist, a plan), keep it as a page instead of re-posting tables: it shows in the chat as a small preview and opens full screen, and you update it in place. Kinds: people (contact cards), board (columns of cards, e.g. New → Contacted → Meeting → Signed), table, list, draft (an email draft for review).
+When ${owner} wants to see a set of things (people, a pipeline, a shortlist, a plan), keep it as a page instead of re-posting tables: it shows in the chat as a small preview and opens full screen, and you update it in place. Kinds: people (contact cards), board (columns of cards, e.g. New → Contacted → Meeting → Signed), table, list, draft (an email draft for review), moodboard (visual references as image cards: links get their preview image automatically, image_path puts a local image such as a shared photo on it; use it for references, inspiration and shortlists of photos).
   ${TOOLS_DIR}/intern-page create --intern <your-slug> --kind people --title "My people" --summary "23 people · 4 follow-ups this week" --data-file <json>
   ${TOOLS_DIR}/intern-page list --intern <your-slug>        # your pages (check before creating a duplicate)
   ${TOOLS_DIR}/intern-page show <page_id>                    # attach an existing page's preview to this reply

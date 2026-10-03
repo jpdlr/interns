@@ -21,6 +21,7 @@ import { PAGE_KIND_LABEL, usePage } from "../../src/usePage";
 import { PageKindIcon } from "../../src/ui/Fences";
 import { ChatIcon, PinIcon } from "../../src/ui/Icons";
 import { BoardView, DraftView, ListView, OwnerLine, pageMessage, PeopleView, TableView } from "../../src/ui/pages/PageViews";
+import { MoodboardView } from "../../src/ui/pages/Moodboard";
 import { EmptyState, ErrorNote, Loading, Screen } from "../../src/ui/Screen";
 import { Text } from "../../src/ui/Text";
 
@@ -146,6 +147,8 @@ export default function PageScreen() {
             <BoardView page={page} ask={ask} focusItem={item} />
           ) : page.kind === "table" ? (
             <TableView page={page} ask={ask} focusItem={item} />
+          ) : page.kind === "moodboard" ? (
+            <MoodboardView page={page} ask={ask} focusItem={item} onChanged={() => reload()} />
           ) : page.kind === "draft" ? (
             <DraftView page={page} ask={ask} />
           ) : (
