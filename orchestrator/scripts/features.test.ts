@@ -24,7 +24,7 @@ const { setProfile } = await import("../src/profile.js");
 const { EventBus } = await import("../src/events.js");
 const { Db } = await import("../src/db.js");
 const { Registry } = await import("../src/registry.js");
-const { Orchestrator, isSilentReply } = await import("../src/orchestrator.js");
+const { Orchestrator, isSilentReply, isNothingToReport } = await import("../src/orchestrator.js");
 const { InternManifestSchema } = await import("../src/types.js");
 const { DiscordAdapter } = await import("../src/discord.js");
 const { PushService, wirePushNotifications } = await import("../src/push.js");
@@ -351,6 +351,26 @@ try {
     db.enqueueTask("rhea", "trigger", { type: "github_pull_request", repository: "acme/widget", pull_number: 1 });
     await orch.drain();
     assert.equal(db.listMessages("rhea", 500).length, count);
+  });
+
+  await check("background runs: told to stay quiet, and a nothing-to-report reply is dropped", async () => {
+    const count = db.listMessages("tessa", 500).length;
+    const before = prompts.length;
+    script = () => "Same oscillation, nothing new. No card.";
+    db.enqueueTask("tessa", "trigger", { kind: "new_mail", mailbox: "work", count: 1, messages: [{ from: "alerts@nuvflow.example", subject: "Back online" }] });
+    await orch.drain();
+    assert.match(prompts.slice(before).find((p) => p.slug === "tessa")!.input, /reply with exactly \(nothing\)/);
+    assert.equal(db.listMessages("tessa", 500).length, count, "not posted");
+    script = () => "Ada at Willowbrook Vet replied: she wants Thursday at 10. Draft ready.";
+    db.enqueueTask("tessa", "trigger", { kind: "new_mail", mailbox: "work", count: 1, messages: [{ from: "ada@willowbrook-vet.example", subject: "Re: demo" }] });
+    await orch.drain();
+    assert.equal(db.listMessages("tessa", 500).length, count + 1, "real news is posted");
+    // the same words in answer to the owner are kept: they asked
+    script = () => "Nothing new. No card.";
+    await say("tessa", "anything new?");
+    assert.equal(lastMessage("tessa").text, "Nothing new. No card.");
+    assert.ok(!isNothingToReport("Nothing new from Ada, but should I nudge her?"), "a question is kept");
+    assert.ok(isNothingToReport("Absorbed."));
   });
 
   // ---------------------------------------------------------------- pages

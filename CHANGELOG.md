@@ -64,6 +64,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
   has no post, comment or message command.
 
 ### Fixed
+- **No more "nothing new" messages.** Background runs (new mail, a schedule, a backlog item)
+  are told nobody is waiting and to reply `(nothing)` when nothing needs you; they used to be
+  told to "report", so an intern posted "Same oscillation, nothing new. No card." A short
+  background reply that only says nothing happened is dropped as well. Answers to your own
+  questions are never dropped.
 - **Table pages no longer lose their rows.** A table written with `items` (as every other page
   kind calls its list) or columns with `label` saved empty, because unknown fields were dropped
   silently. Both are accepted now, and an empty table says so.
