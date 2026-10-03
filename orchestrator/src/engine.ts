@@ -221,7 +221,7 @@ export function carryOverPrompt(db: Db, slug: string, name: string, input: strin
   });
   return [
     `## Where you left off`,
-    `Your previous session had grown long, so this is a fresh one. Your instructions, standing orders and notes still apply. The end of your chat with ${owner}, for continuity:`,
+    `This is a fresh session (the previous one grew long or was reset). Your instructions, standing orders and notes apply as they are now. The end of your chat with ${owner}, for continuity:`,
     ...(lines.length ? lines : ["(no earlier messages)"]),
     ``,
     `## Now`,
@@ -304,7 +304,11 @@ export class SdkEngine implements Engine {
     const rotating = Boolean(stored) && Number(this.db.getKv(`session_ctx:${slug}`) ?? 0) > SESSION_ROTATE_TOKENS;
     const prevSession = rotating ? null : stored;
     if (prevSession) options.resume = prevSession;
-    if (rotating) input = `${carryOverPrompt(this.db, slug, manifest.name, input)}\n${input}`;
+    // No session to resume (closed above, expired, or reset) but a chat to
+    // continue: start from the end of it.
+    if (!opts.freshSession && !prevSession && this.db.listMessages(slug, 2).length > 1) {
+      input = `${carryOverPrompt(this.db, slug, manifest.name, input)}\n${input}`;
+    }
     /** the largest context a main-loop call of this run carried */
     let contextTokens = 0;
 
