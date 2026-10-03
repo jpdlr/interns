@@ -10,6 +10,7 @@ import { ApiError, createApi, type ConnectorsOverview, type Intern, type NotifyS
 import { NOTIFY_INFO } from "../../src/internFile";
 import { friendlyError } from "../../src/errors";
 import { useLive } from "../../src/live";
+import { useCoordinatorName } from "../../src/owner";
 import { usePushNotifications } from "../../src/push";
 import { DEFAULT_BASE_URL, useSettings } from "../../src/settings";
 import { radius, scaledFont, space, useAppTheme, type TextSize, type ThemeMode } from "../../src/theme";
@@ -132,6 +133,7 @@ export default function SettingsScreen() {
   const { status, detail } = useLive();
   const pushNotifications = usePushNotifications(api);
   const params = useLocalSearchParams<{ tab?: string }>();
+  const coordinator = useCoordinatorName();
 
   const [baseUrl, setBaseUrl] = useState(settings.baseUrl);
   const [token, setToken] = useState(settings.token);
@@ -286,7 +288,7 @@ export default function SettingsScreen() {
           <Row label="Spend" detail="What the crew costs, per intern and per conversation" onPress={() => router.push("/spend" as never)} />
           <Row
             label={suggesting ? "Looking at the evidence…" : "Ask for suggestions"}
-            detail="A hire, an integration or a schedule. The Coordinator also looks every Monday."
+            detail={`A hire, an integration or a schedule. The ${coordinator} also looks every Monday.`}
             onPress={suggesting ? undefined : () => void askSuggestions()}
           />
         </Group>

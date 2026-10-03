@@ -2,13 +2,14 @@
  * Connectors: one card per tool the crew can use, with where it stands and
  * one tap to connect or manage it. Outlook and GitHub run their whole setup
  * from here (connectors/outlook, connectors/github); anything else is a
- * conversation with the Coordinator, whose builder can make a connector.
+ * conversation with the coordinator, whose builder can make a connector.
  */
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useState } from "react";
 import { ScrollView, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ConnectorsOverview } from "../../src/api";
+import { useCoordinatorName } from "../../src/owner";
 import { useSettings } from "../../src/settings";
 import { space } from "../../src/theme";
 import { ConnectorCard, githubSummary, outlookSummary } from "../../src/ui/ConnectorCard";
@@ -21,6 +22,7 @@ export default function ConnectorsScreen() {
   const { api, configured } = useSettings();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const coordinator = useCoordinatorName();
   const [overview, setOverview] = useState<ConnectorsOverview | null>(null);
   const [error, setError] = useState<unknown>(null);
 
@@ -64,7 +66,7 @@ export default function ConnectorsScreen() {
         <ConnectorCard
           icon={<BulbIcon size={24} />}
           title="Something else?"
-          description="Tell the Coordinator what you'd like connected. Your builder intern can make a connector for it, with your approval at each step."
+          description={`Tell the ${coordinator} what you'd like connected. Your builder intern can make a connector for it, with your approval at each step.`}
           action="Ask"
           onPress={() => router.push("/chat/coordinator" as never)}
         />

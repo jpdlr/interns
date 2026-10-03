@@ -19,6 +19,7 @@ import { nameConflict, useCrew } from "../src/crew";
 import { shortTokens, TOOL_INFO, wordCount } from "../src/internFile";
 import { useConfirmDiscard } from "../src/nav";
 import { describeMentions, useNameCarry, type ProseField } from "../src/rename";
+import { useCoordinatorName } from "../src/owner";
 import { useSettings } from "../src/settings";
 import { radius, scaledFont, space, useAppTheme } from "../src/theme";
 import { Button } from "../src/ui/Button";
@@ -59,6 +60,7 @@ export default function HireScreen() {
   const { api, configured } = useSettings();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const coordinator = useCoordinatorName();
 
   const { role: roleParam, template: templateParam } = useLocalSearchParams<{ role?: string; template?: string }>();
   const { templates } = useTemplates();
@@ -209,7 +211,7 @@ export default function HireScreen() {
               <View style={styles.group}>
                 <Text variant="display">Who do you need?</Text>
                 <Text variant="subtle">
-                  Describe it roughly — the Coordinator writes the job description, picks their
+                  Describe it roughly — the {coordinator} writes the job description, picks their
                   tools and drafts a personality. You get to edit all of it before anyone is hired.
                 </Text>
                 <TextInput
@@ -252,7 +254,7 @@ export default function HireScreen() {
               <View style={styles.waiting}>
                 <ThinkingIndicator
                   faceId="coordinator"
-                  name="The Coordinator"
+                  name={`The ${coordinator}`}
                   size={72}
                   caption={STATUS_LINES[statusIndex]}
                 />
@@ -359,7 +361,7 @@ export default function HireScreen() {
                   </Expandable>
                 </Group>
 
-                <Group title="What they can use" footer="Picked by the Coordinator for this job. You can change tools on their profile after hiring.">
+                <Group title="What they can use" footer={`Picked by the ${coordinator} for this job. You can change tools on their profile after hiring.`}>
                   {draft.tools.length ? (
                     draft.tools.map((tool) => <Row key={tool} icon={<ToolIcon tool={tool} />} label={TOOL_INFO[tool]?.label ?? tool} detail={TOOL_INFO[tool]?.detail} />)
                   ) : (
