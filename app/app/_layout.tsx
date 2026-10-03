@@ -34,7 +34,7 @@ export default function RootLayout() {
 
 function AppNavigation() {
   const router = useRouter();
-  const { updateReady, apply } = useAppUpdate();
+  const { updateReady, apply, dismiss } = useAppUpdate();
   const { colors, scheme, fontScale } = useAppTheme();
   const base = scheme === "dark" ? DarkTheme : DefaultTheme;
   const theme: Theme = {
@@ -108,7 +108,7 @@ function AppNavigation() {
               <Stack.Screen name="page/[id]" options={{ title: "" }} />
               <Stack.Screen name="history" options={{ title: "History" }} />
             </Stack>
-            <UpdatePill visible={updateReady} onPress={apply} />
+            <UpdatePill visible={updateReady} onPress={apply} onDismiss={dismiss} />
           </ThemeProvider>
   );
 }

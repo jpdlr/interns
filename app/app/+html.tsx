@@ -5,7 +5,9 @@
  * safe-area inset every screen sits inside, and the one global keyframe the
  * faces layer onto their own idle loops.
  *
- * There is deliberately no JavaScript here. Earlier versions mirrored
+ * The only JavaScript is one line that applies the saved Light/Dark setting
+ * before the first paint (the app paints its first frame from CSS variables,
+ * src/palette.ts). Earlier versions mirrored
  * visualViewport geometry into custom properties to keep the composer above
  * the iOS keyboard; three rounds of that never survived contact with a real
  * iPhone, so the app now stays in ordinary document flow and lets iOS move the
@@ -14,6 +16,13 @@
  */
 import { ScrollViewStyleReset } from "expo-router/html";
 import React from "react";
+import { paletteCss } from "../src/palette";
+
+/**
+ * Light/Dark from the app's own setting (AsyncStorage = localStorage on web),
+ * on <html> before anything paints. "system" leaves it to the media query.
+ */
+const themeScript = `try{var m=localStorage.getItem("interns.theme.v1");if(m==="light"||m==="dark"){document.documentElement.dataset.theme=m;var b=m==="dark"?"#09090b":"#ffffff";document.querySelectorAll('meta[name="theme-color"]').forEach(function(t){t.setAttribute("content",b)})}}catch(e){}`;
 
 export default function Root({ children }: { children: React.ReactNode }) {
   return (
@@ -43,7 +52,8 @@ export default function Root({ children }: { children: React.ReactNode }) {
 
         {/* Keeps body scroll from fighting react-native-web ScrollViews. */}
         <ScrollViewStyleReset />
-        <style dangerouslySetInnerHTML={{ __html: bodyStyle }} />
+        <style dangerouslySetInnerHTML={{ __html: bodyStyle + paletteCss() }} />
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body>{children}</body>
     </html>
@@ -54,7 +64,7 @@ const bodyStyle = `
 /* Bumped whenever this stylesheet changes so the Settings diagnostics can say
    which shell an installed PWA is actually running (they cache aggressively). */
 :root {
-  --interns-shell: "shadcn-theme-v1";
+  --interns-shell: "theme-vars-v2";
   --interns-bg: #ffffff;
   --interns-focus: #18181b;
   background-color: var(--interns-bg);
