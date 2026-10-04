@@ -193,11 +193,23 @@ export class DriveSync {
     return id;
   }
 
+  /**
+   * Download to disk, resuming a partial file left by a restart or a dropped
+   * connection (a Takeout zip is tens of GB) with a Range request.
+   */
   private async download(f: DriveFile, to: string): Promise<void> {
+    const have = fs.existsSync(to) ? fs.statSync(to).size : 0;
+    const size = Number(f.size ?? 0);
+    if (size && have === size) return; // already complete
     const token = await this.photos.accessToken();
-    const res = await this.fetch(`${DRIVE}/files/${encodeURIComponent(f.id)}?alt=media`, { headers: { Authorization: `Bearer ${token}` } });
+    const resume = have > 0 && have < size;
+    const res = await this.fetch(`${DRIVE}/files/${encodeURIComponent(f.id)}?alt=media`, {
+      headers: { Authorization: `Bearer ${token}`, ...(resume ? { Range: `bytes=${have}-` } : {}) },
+    });
     if (!res.ok || !res.body) throw new PhotosError(502, `Google Drive: couldn't download ${f.name} (HTTP ${res.status})`);
-    await pipeline(Readable.fromWeb(res.body as never), fs.createWriteStream(to));
+    // 206: the rest of the file follows; 200: the whole file again
+    const append = resume && res.status === 206;
+    await pipeline(Readable.fromWeb(res.body as never), fs.createWriteStream(to, { flags: append ? "a" : "w" }));
   }
 
   private async sync(): Promise<void> {
@@ -241,8 +253,9 @@ export class DriveSync {
         const size = zip.size ? ` (${(Number(zip.size) / 1e9).toFixed(1)} GB)` : "";
         this.progress = `Downloading ${zip.name}${size}, ${n + 1} of ${zips.length}…`;
         const local = path.join(tmp, `${zip.id}.zip`);
+        // A failed download keeps its partial file: the next sync carries on from there.
+        await this.download(zip, local);
         try {
-          await this.download(zip, local);
           this.progress = `Importing ${zip.name}…`;
           await take([...common(), "--zip", local]);
         } finally {

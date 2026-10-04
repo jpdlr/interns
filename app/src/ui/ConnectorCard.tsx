@@ -37,6 +37,17 @@ export function instagramSummary(i: ConnectorsOverview["instagram"]): { text: st
   return { text: `@${i.account.username} · ${i.used_by.map((u) => u.name).join(", ")}`, tone: "ok" };
 }
 
+/**
+ * The last Connectors overview this app loaded, so Settings and the
+ * Connectors list draw at once and refresh behind it.
+ */
+let lastOverview: ConnectorsOverview | null = null;
+export const cachedOverview = () => lastOverview;
+export const rememberOverview = (o: ConnectorsOverview) => {
+  lastOverview = o;
+  return o;
+};
+
 export function googlePhotosSummary(g: ConnectorsOverview["google_photos"]): { text: string; tone: ConnectorTone } {
   if (!g || !g.app.configured) return { text: "Not set up", tone: "off" };
   if (g.needs_reconnect) return { text: "Needs connecting again", tone: "attention" };

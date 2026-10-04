@@ -100,6 +100,8 @@ const META_APP_SECRET = /^[0-9a-f]{32}$/i;
 const CLIENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Free mail providers: their domain is never "one of the owner's own". */
 const PERSONAL_DOMAINS = new Set(["outlook.com", "hotmail.com", "live.com", "msn.com", "gmail.com", "icloud.com", "yahoo.com"]);
+/** How long GitHub's state is shown without asking GitHub again. */
+const GITHUB_STATUS_FRESH_MS = 5 * 60_000;
 /** One-time GitHub flow states live this long (creating or installing the App takes a minute or two). */
 const GITHUB_STATE_TTL_MS = 15 * 60_000;
 
@@ -160,6 +162,8 @@ export class ConnectorService {
   private appCache: { at: number; app: Awaited<ReturnType<GithubClient["getApp"]>> } | null = null;
   private checks = new Map<string, { at: string; ok: boolean; unread?: number; error?: string }>();
   private instagramCheck: { at: string; ok: boolean; followers?: number; error?: string } | null = null;
+  private githubCache: { at: number; value: Awaited<ReturnType<ConnectorService["fetchGithubStatus"]>> } | null = null;
+  private githubRefresh: Promise<Awaited<ReturnType<ConnectorService["fetchGithubStatus"]>>> | null = null;
   private readonly startLogin: StartLogin;
   private readonly checkMailboxFn: (id: string) => Promise<{ ok: boolean; unread?: number; error?: string }>;
   private readonly graphFetch: GraphFetch;
@@ -168,6 +172,8 @@ export class ConnectorService {
     this.startLogin = deps.startLogin ?? defaultStartLogin;
     this.checkMailboxFn = deps.checkMailbox ?? defaultCheckMailbox(deps.home);
     this.graphFetch = deps.graphFetch ?? defaultGraphFetch;
+    // Have GitHub's state ready before anyone opens Connectors.
+    setTimeout(() => void this.githubStatus().catch(() => {}), 5_000).unref?.();
   }
 
   private save(): void {
@@ -366,7 +372,32 @@ export class ConnectorService {
 
   // ------------------------------------------------------------ GitHub
 
-  async githubStatus() {
+  /**
+   * GitHub's state, kept for a few minutes: it asks GitHub's API, which made
+   * the whole Connectors list wait on it. A stale copy is returned at once and
+   * refreshed in the background; anything that changes GitHub clears it.
+   */
+  async githubStatus(): Promise<Awaited<ReturnType<ConnectorService["fetchGithubStatus"]>>> {
+    const cached = this.githubCache;
+    if (cached && Date.now() - cached.at < GITHUB_STATUS_FRESH_MS) return cached.value;
+    const refresh = (this.githubRefresh ??= this.fetchGithubStatus()
+      .then((value) => {
+        this.githubCache = { at: Date.now(), value };
+        return value;
+      })
+      .finally(() => {
+        this.githubRefresh = null;
+      }));
+    return cached ? cached.value : refresh;
+  }
+
+  /** Forget the cached GitHub state (after anything that changes it). */
+  private githubChanged(): void {
+    this.githubCache = null;
+    this.githubRefresh = null; // a fetch already under way may predate the change
+  }
+
+  private async fetchGithubStatus() {
     const { config, registry, github } = this.deps;
     const appSet = Boolean(config.github.app_id && config.github.private_key_path && fs.existsSync(config.github.private_key_path));
     const reviewer = registry.get(config.github.reviewer_slug);
@@ -469,6 +500,7 @@ export class ConnectorService {
 
   /** Step 2 (browser, from GitHub): store the new App, then send the browser on to install it. */
   async githubCallback(code: string, state: string): Promise<string> {
+    this.githubChanged();
     const pending = this.takeState(state, "create");
     if (!code) throw new ConnectorError(400, "GitHub didn't send the App back.");
     const app = await this.deps.github.convertManifest(code);
@@ -497,6 +529,7 @@ export class ConnectorService {
    * switched off. Returns where to send the browser.
    */
   async githubInstalled(state: string | undefined): Promise<string> {
+    this.githubChanged();
     const pending = this.takeState(state, "install");
     await this.syncGithub({ enableNew: true });
     return `${pending.origin}/connectors/github?connected=1`;
@@ -504,6 +537,7 @@ export class ConnectorService {
 
   /** Mirror GitHub's installations into config; newly installed accounts get reviews on when `enableNew`. */
   async syncGithub(opts: { enableNew?: boolean } = {}): Promise<void> {
+    this.githubChanged();
     const { config, github } = this.deps;
     const installations = (await github.listInstallations()).filter((i) => !i.suspended_at && i.account?.login);
     const known = new Set(Object.keys(config.github.installation_ids).map((l) => l.toLowerCase()));
@@ -527,6 +561,7 @@ export class ConnectorService {
 
   /** Which accounts get reviews, and which intern reviews. */
   updateGithub(patch: { accounts?: Record<string, boolean>; reviewer?: string }): void {
+    this.githubChanged();
     const { config, registry } = this.deps;
     if (patch.accounts) {
       let repositories = [...config.github.repositories];
@@ -550,6 +585,7 @@ export class ConnectorService {
 
   /** Forget the App here (it stays on GitHub until deleted there) and take the GitHub tool back. */
   disconnectGithub(): void {
+    this.githubChanged();
     const { config, registry, home } = this.deps;
     const key = config.github.private_key_path;
     config.github.app_id = "";

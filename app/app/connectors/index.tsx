@@ -13,7 +13,7 @@ import type { ConnectorsOverview } from "../../src/api";
 import { useCoordinatorName } from "../../src/owner";
 import { useSettings } from "../../src/settings";
 import { space } from "../../src/theme";
-import { ConnectorCard, githubSummary, googlePhotosSummary, instagramSummary, outlookSummary } from "../../src/ui/ConnectorCard";
+import { cachedOverview, ConnectorCard, githubSummary, googlePhotosSummary, instagramSummary, outlookSummary, rememberOverview } from "../../src/ui/ConnectorCard";
 import { BrandLogo } from "../../src/ui/BrandLogo";
 import { BulbIcon } from "../../src/ui/Icons";
 import { EmptyState, ErrorNote, Loading, Screen } from "../../src/ui/Screen";
@@ -24,12 +24,13 @@ export default function ConnectorsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const coordinator = useCoordinatorName();
-  const [overview, setOverview] = useState<ConnectorsOverview | null>(null);
+  // the last list this app saw draws at once; the fresh one replaces it
+  const [overview, setOverview] = useState<ConnectorsOverview | null>(cachedOverview);
   const [error, setError] = useState<unknown>(null);
 
   const load = useCallback(() => {
     api.connectors().then(
-      (o) => (setOverview(o), setError(null)),
+      (o) => (setOverview(rememberOverview(o)), setError(null)),
       (e) => setError(e),
     );
   }, [api]);

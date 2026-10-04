@@ -16,7 +16,7 @@ import { DEFAULT_BASE_URL, useSettings } from "../../src/settings";
 import { radius, scaledFont, space, useAppTheme, type TextSize, type ThemeMode } from "../../src/theme";
 import { Button } from "../../src/ui/Button";
 import { ConnectionPill } from "../../src/ui/ConnectionPill";
-import { githubSummary, outlookSummary } from "../../src/ui/ConnectorCard";
+import { cachedOverview, githubSummary, googlePhotosSummary, instagramSummary, outlookSummary, rememberOverview } from "../../src/ui/ConnectorCard";
 import { Group, Row, Segmented, Switch } from "../../src/ui/Grouped";
 import { BrandLogo } from "../../src/ui/BrandLogo";
 import { BulbIcon, CheckIcon } from "../../src/ui/Icons";
@@ -304,15 +304,15 @@ export default function SettingsScreen() {
   );
 }
 
-/** Outlook and GitHub with where they stand; each opens its own screen (app/connectors). */
+/** Each connector with where it stands, opening its own screen (app/connectors), and the full list. */
 function ConnectorsGroup() {
   const { api } = useSettings();
   const router = useRouter();
-  const [overview, setOverview] = useState<ConnectorsOverview | null>(null);
+  const [overview, setOverview] = useState<ConnectorsOverview | null>(cachedOverview);
   useFocusEffect(
     useCallback(() => {
       let live = true;
-      api.connectors().then((o) => live && setOverview(o), () => {});
+      api.connectors().then((o) => live && setOverview(rememberOverview(o)), () => {});
       return () => {
         live = false;
       };
@@ -320,11 +320,15 @@ function ConnectorsGroup() {
   );
   const outlook = overview ? outlookSummary(overview.outlook) : null;
   const github = overview ? githubSummary(overview.github) : null;
+  const instagram = overview ? instagramSummary(overview.instagram) : null;
+  const photos = overview ? googlePhotosSummary(overview.google_photos) : null;
   return (
     <Group title="Connectors" footer="The tools your interns work in. Mail stays drafts and reviews stay proposals until you approve them.">
       <Row label="Outlook" icon={<BrandLogo brand="outlook" size={24} />} detail={outlook?.text} onPress={() => router.push("/connectors/outlook" as never)} />
       <Row label="GitHub" icon={<BrandLogo brand="github" size={24} />} detail={github?.text} onPress={() => router.push("/connectors/github" as never)} />
-      <Row label="Something else" icon={<BulbIcon size={22} />} onPress={() => router.push("/connectors" as never)} />
+      <Row label="Instagram" icon={<BrandLogo brand="instagram" size={24} />} detail={instagram?.text} onPress={() => router.push("/connectors/instagram" as never)} />
+      <Row label="Google Photos" icon={<BrandLogo brand="google-photos" size={24} />} detail={photos?.text} onPress={() => router.push("/connectors/google-photos" as never)} />
+      <Row label="All connectors" icon={<BulbIcon size={22} />} detail="Or ask for a new one" onPress={() => router.push("/connectors" as never)} />
     </Group>
   );
 }

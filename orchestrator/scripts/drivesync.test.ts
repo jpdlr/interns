@@ -85,6 +85,8 @@ const files = {
   loose: { id: "f1", name: "IMG_3001.jpg", mimeType: "image/jpeg", modifiedTime: "2026-10-03T13:00:00Z", imageMediaMetadata: { time: "2024:06:01 10:00:00" } },
 };
 const calls: string[] = [];
+/** where each download of the zip started (0 = from the top) */
+const ranges: number[] = [];
 let folderCreated = 0;
 const fakeFetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = String(input);
@@ -101,7 +103,12 @@ const fakeFetch = (async (input: string | URL | Request, init?: RequestInit) => 
     if (q.includes("'folder1' in parents")) return json({ files: [files.loose] });
     return json({ files: [] });
   }
-  if (url.includes("/files/z1?alt=media")) return new Response(fs.readFileSync(path.join(fixtures, "takeout.zip")));
+  if (url.includes("/files/z1?alt=media")) {
+    const bytes = fs.readFileSync(path.join(fixtures, "takeout.zip"));
+    const range = /bytes=(\d+)-/.exec(String((init?.headers as Record<string, string> | undefined)?.Range ?? ""));
+    ranges.push(range ? Number(range[1]) : 0);
+    return range ? new Response(bytes.subarray(Number(range[1])), { status: 206 }) : new Response(bytes);
+  }
   if (url.includes("/files/f1?alt=media")) return new Response(fs.readFileSync(path.join(fixtures, "loose.jpg")));
   return new Response("{}", { status: 404 });
 }) as typeof fetch;
@@ -119,7 +126,12 @@ try {
   });
 
   await check("a sync: makes the folder, imports the Takeout zip and the loose photo, keeps only 2023 on", async () => {
+    // a restart left half the zip on disk: the download carries on from there
+    const half = Math.floor(fs.statSync(path.join(fixtures, "takeout.zip")).size / 2);
+    fs.mkdirSync(path.join(home, "photos", "import"), { recursive: true });
+    fs.writeFileSync(path.join(home, "photos", "import", "z1.zip"), fs.readFileSync(path.join(fixtures, "takeout.zip")).subarray(0, half));
     await sync.run();
+    assert.deepEqual(ranges, [half], "resumed with a Range request, not from the top");
     const st = sync.status();
     assert.equal(st.last_result?.error, undefined, st.last_result?.error);
     assert.equal(folderCreated, 1);
