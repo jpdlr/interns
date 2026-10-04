@@ -331,14 +331,17 @@ const styles = StyleSheet.create({
   rowMine: { justifyContent: "flex-end", paddingLeft: space.xxxl },
   rowTheirs: { justifyContent: "flex-start", paddingRight: space.lg },
   gutter: { alignItems: "center" },
-  column: { flexShrink: 1, minWidth: 0 },
+  // The width cap lives on the column, and the bubble is held to the column:
+  // a bubble capped only at 560 grows to fit a nowrap reply quote and runs
+  // off a phone screen (left for yours, right for theirs).
+  column: { flexShrink: 1, minWidth: 0, maxWidth: 560 },
   columnMine: { alignItems: "flex-end" },
-  columnTheirs: { flex: 1, alignItems: "flex-start", maxWidth: 600 },
+  columnTheirs: { flex: 1, alignItems: "flex-start" },
   bubble: {
     paddingVertical: space.md - 2,
     paddingHorizontal: space.lg - 2,
     borderRadius: radius.lg,
-    maxWidth: 560,
+    maxWidth: "100%",
   },
   bubbleRich: { alignSelf: "stretch" },
   mine: { borderBottomRightRadius: radius.sm },
