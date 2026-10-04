@@ -71,6 +71,12 @@ and versions follow [Semantic Versioning](https://semver.org/).
   has no post, comment or message command.
 
 ### Fixed
+- **Connectors open at once.** The list waited on GitHub's API every time; GitHub's state is now
+  kept for a few minutes, refreshed in the background, and ready at startup. Settings lists every
+  connector (Instagram and Google Photos too) with "All connectors" instead of "Something else",
+  and both screens draw the last list straight away.
+- **Photo sync downloads resume.** A Takeout zip is tens of GB; a restart or dropped connection
+  used to start it again from the top. The partial file is kept and continued with a Range request.
 - **No more "nothing new" messages.** Background runs (new mail, a schedule, a backlog item)
   are told nobody is waiting and to reply `(nothing)` when nothing needs you; they used to be
   told to "report", so an intern posted "Same oscillation, nothing new. No card." A short

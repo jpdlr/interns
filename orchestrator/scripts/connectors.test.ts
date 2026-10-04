@@ -103,6 +103,7 @@ const fakeGithub = {
     return login === "northwind" ? ("Organization" as const) : login === "nobody-here" ? null : ("User" as const);
   },
   async listInstallations() {
+    githubCalls.push("list");
     return fakeGithub.installations;
   },
   resetTokens() {
@@ -329,6 +330,19 @@ try {
     const more = await call("POST", "/connectors/github/install", { origin: "https://interns.example.com" });
     assert.match(more.body.url, /^https:\/\/github\.com\/apps\/interns-for-northwind\/installations\/new\?state=/);
     assert.ok(!JSON.stringify(status).includes("BEGIN KEY") && !JSON.stringify(status).includes("whsec"), "no secrets in responses");
+  });
+
+  await check("github: the Connectors list doesn't ask GitHub every time; a change shows at once", async () => {
+    await call("GET", "/connectors");
+    const before = githubCalls.filter((c) => c === "list").length;
+    await call("GET", "/connectors");
+    await call("GET", "/connectors/github");
+    assert.equal(githubCalls.filter((c) => c === "list").length, before, "served from the cache");
+    fakeGithub.installations.push({ id: 9, account: { login: "acme-extra", type: "Organization" }, repository_selection: "all", suspended_at: null });
+    const status = (await call("POST", "/connectors/github/sync")).body;
+    assert.ok(status.installations.some((i: { login: string }) => i.login === "acme-extra"), "a sync refreshes it");
+    fakeGithub.installations.pop();
+    await call("POST", "/connectors/github/sync");
   });
 
   await check("github: accounts on/off, reviewer gets the tool, a re-sync keeps choices, disconnect cleans up", async () => {
