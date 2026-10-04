@@ -210,8 +210,10 @@ export class DriveSync {
       this.progress = "Looking in Google Drive…";
       const folderId = await this.folder(s);
       const fields = "id,name,mimeType,size,modifiedTime,createdTime,imageMediaMetadata(time)";
-      const zips = (await this.list("name contains 'takeout-' and (mimeType = 'application/zip' or mimeType = 'application/x-zip-compressed') and trashed = false", fields)).filter(
-        (f) => s.seen[f.id] !== f.modifiedTime,
+      // By name: Drive labels Takeout zips application/zip, application/x-zip or
+      // application/x-zip-compressed depending on the day.
+      const zips = (await this.list("name contains 'takeout-' and trashed = false", fields)).filter(
+        (f) => /\.zip$/i.test(f.name) && f.mimeType !== UPLOAD_FOLDER_MIME && s.seen[f.id] !== f.modifiedTime,
       );
       const loose = (await this.list(`'${folderId}' in parents and trashed = false and (mimeType contains 'image/' or mimeType contains 'video/')`, fields)).filter(
         (f) => s.seen[f.id] !== f.modifiedTime,
@@ -227,7 +229,8 @@ export class DriveSync {
         const items: LibraryItem[] = [];
         const summary = await this.runner(args, (item) => {
           items.push({ ...item, imported_at: new Date().toISOString(), batch });
-          if (items.length % 25 === 0) this.photos.addToLibrary(items.splice(0));
+          // a big export is tens of thousands of photos: save progress in batches, not per photo
+          if (items.length >= 200) this.photos.addToLibrary(items.splice(0));
         });
         this.photos.addToLibrary(items);
         result.imported += summary.imported;

@@ -81,7 +81,7 @@ const registry = new Registry(home);
 const photos = new GooglePhotos(home, registry);
 
 const files = {
-  zip: { id: "z1", name: "takeout-20261003T120000Z-001.zip", mimeType: "application/zip", size: String(fs.statSync(path.join(fixtures, "takeout.zip")).size), modifiedTime: "2026-10-03T12:00:00Z" },
+  zip: { id: "z1", name: "takeout-20261003T120000Z-001.zip", mimeType: "application/x-zip", size: String(fs.statSync(path.join(fixtures, "takeout.zip")).size), modifiedTime: "2026-10-03T12:00:00Z" },
   loose: { id: "f1", name: "IMG_3001.jpg", mimeType: "image/jpeg", modifiedTime: "2026-10-03T13:00:00Z", imageMediaMetadata: { time: "2024:06:01 10:00:00" } },
 };
 const calls: string[] = [];
@@ -97,7 +97,7 @@ const fakeFetch = (async (input: string | URL | Request, init?: RequestInit) => 
   if (url.includes("/files?")) {
     const q = new URL(url).searchParams.get("q") ?? "";
     if (q.includes("mimeType = 'application/vnd.google-apps.folder'")) return json({ files: [] });
-    if (q.includes("takeout-")) return json({ files: [files.zip] });
+    if (q.includes("takeout-")) return json({ files: [files.zip, { id: "tf", name: "takeout-20261003T120000Z", mimeType: "application/vnd.google-apps.folder", modifiedTime: "2026-10-03T12:00:00Z" }] });
     if (q.includes("'folder1' in parents")) return json({ files: [files.loose] });
     return json({ files: [] });
   }
