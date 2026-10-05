@@ -30,7 +30,7 @@ export default function PageScreen() {
   const router = useRouter();
   const { colors } = useAppTheme();
   const { api, ready, configured } = useSettings();
-  const { page, error, reload } = usePage(id);
+  const { page, error, reload, update } = usePage(id);
   const crew = useCrew();
   const [toast, setToast] = useState<{ text: string; thread?: string } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -148,7 +148,7 @@ export default function PageScreen() {
           ) : page.kind === "table" ? (
             <TableView page={page} ask={ask} focusItem={item} />
           ) : page.kind === "moodboard" ? (
-            <MoodboardView page={page} ask={ask} focusItem={item} onChanged={() => reload()} />
+            <MoodboardView page={page} ask={ask} focusItem={item} onChanged={update} />
           ) : page.kind === "draft" ? (
             <DraftView page={page} ask={ask} />
           ) : (

@@ -9,22 +9,28 @@ import { useLiveEvents } from "./live";
 import { loadPageSeen, onPageSeenChange } from "./pageSeen";
 import { useSettings } from "./settings";
 
-export function usePage(id: string | undefined): { page: Page | null; error: string | null; reload: () => void; seenVersion: number | undefined } {
+export function usePage(id: string | undefined): { page: Page | null; error: string | null; reload: () => void; update: (page: Page) => void; seenVersion: number | undefined } {
   const { api, configured } = useSettings();
   const [page, setPage] = useState<Page | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [seenVersion, setSeenVersion] = useState<number | undefined>(undefined);
+
+  // Apply mutation responses immediately; an older in-flight refetch must not
+  // undo a like or tag the owner just saved.
+  const update = useCallback((next: Page) => {
+    setPage((current) => current?.id === next.id && current.version > next.version ? current : next);
+  }, []);
 
   const reload = useCallback(() => {
     if (!id || !configured) return;
     api
       .getPage(id)
       .then((next) => {
-        setPage(next);
+        update(next);
         setError(null);
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, [api, configured, id]);
+  }, [api, configured, id, update]);
 
   useEffect(() => {
     reload();
@@ -45,7 +51,7 @@ export function usePage(id: string | undefined): { page: Page | null; error: str
     if (!page || changed.version !== page.version || changed.pinned !== page.pinned || changed.archived !== Boolean(page.archived_at)) reload();
   });
 
-  return { page, error, reload, seenVersion };
+  return { page, error, reload, update, seenVersion };
 }
 
 /** Display label + glyph name per page kind. */

@@ -594,6 +594,7 @@ export interface TableData {
 /** A visual reference on a moodboard: a link, an image, or both. */
 export interface MoodboardItem {
   id: string;
+  liked?: boolean;
   title?: string;
   note?: string;
   url?: string;
@@ -1262,7 +1263,7 @@ export class InternsApi {
     return this.request<Page>(`/pages/${encodeURIComponent(id)}/pin`, { method: "POST", body: JSON.stringify({ pinned }) });
   }
 
-  /** JP's own edits are limited to ticking list items; everything else goes through the owner. */
+  /** Direct item edits, including list checkboxes and moodboard likes/tags. */
   patchPageItem(id: string, itemId: string, set: Record<string, unknown>): Promise<Page> {
     return this.request<Page>(`/pages/${encodeURIComponent(id)}/items/${encodeURIComponent(itemId)}`, { method: "PATCH", body: JSON.stringify({ set }) });
   }

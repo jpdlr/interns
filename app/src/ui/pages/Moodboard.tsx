@@ -14,9 +14,9 @@ import { haptic } from "../../haptics";
 import { useSettings } from "../../settings";
 import { radius, scaledFont, space, useAppTheme } from "../../theme";
 import { filesFromDataTransfer, pickFiles } from "../Attachments";
-import { ExternalIcon, ImageIcon, PlusIcon } from "../Icons";
+import { ExternalIcon, HeartIcon, ImageIcon, PlusIcon } from "../Icons";
 import { Text } from "../Text";
-import { ItemSheet, type AskOwner } from "./PageViews";
+import { FilterChips, ItemSheet, type AskOwner } from "./PageViews";
 
 const URL_RE = /https?:\/\/[^\s<>"']+/g;
 const newId = () => `m_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -28,14 +28,21 @@ export function MoodboardView({ page, ask, focusItem, onChanged }: { page: Page;
   // references keep the order the intern gave them.
   const all = (page.data as MoodboardData).items ?? [];
   const items = [...all.filter((i) => i.ts).sort((a, b) => b.ts!.localeCompare(a.ts!)), ...all.filter((i) => !i.ts)];
-  const [open, setOpen] = useState<MoodboardItem | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const open = all.find((item) => item.id === openId) ?? null;
+  const [likedOnly, setLikedOnly] = useState(false);
+  const [tagFilter, setTagFilter] = useState("");
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const tags = [...new Set(all.flatMap((item) => item.tags ?? []))].sort((a, b) => a.localeCompare(b));
+  const shown = items.filter((item) => (!likedOnly || item.liked) && (!tagFilter || (item.tags ?? []).includes(tagFilter)));
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
-    if (focusItem) setOpen(items.find((i) => i.id === focusItem) ?? null);
+    if (focusItem) setOpenId(focusItem);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusItem]);
 
@@ -49,6 +56,23 @@ export function MoodboardView({ page, ask, focusItem, onChanged }: { page: Page;
       setError(friendlyError(e).message);
     } finally {
       setBusy((n) => n - 1);
+    }
+  };
+  const patch = async (item: MoodboardItem, set: Record<string, unknown>): Promise<boolean> => {
+    if (savingRef.current) return false;
+    savingRef.current = true;
+    setSaving(true);
+    setError(null);
+    try {
+      onChanged(await api.patchPageItem(page.id, item.id, set));
+      haptic("tap");
+      return true;
+    } catch (e) {
+      setError(friendlyError(e).message);
+      return false;
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
   const addImages = (files: UploadableFile[]) => {
@@ -99,7 +123,7 @@ export function MoodboardView({ page, ask, focusItem, onChanged }: { page: Page;
   });
 
   const columns: MoodboardItem[][] = [[], []];
-  items.forEach((item, i) => columns[i % 2]!.push(item));
+  shown.forEach((item, i) => columns[i % 2]!.push(item));
   const label = (i: MoodboardItem) => i.title || i.source || (i.url ? hostOf(i.url) : "Image");
 
   return (
@@ -142,12 +166,24 @@ export function MoodboardView({ page, ask, focusItem, onChanged }: { page: Page;
         </Text>
       ) : null}
 
-      {items.length ? (
+      {all.length ? (
+        <View style={styles.filters}>
+          <FilterChips value={likedOnly ? "liked" : "all"} onChange={(value) => setLikedOnly(value === "liked")} options={[
+            { id: "all", label: `All · ${all.length}` },
+            { id: "liked", label: `Liked · ${all.filter((item) => item.liked).length}` },
+          ]} />
+          {tags.length || tagFilter ? <FilterChips value={tagFilter} onChange={setTagFilter} options={[
+            { id: "", label: "All tags" },
+            ...[...new Set([...tags, ...(tagFilter ? [tagFilter] : [])])].map((tag) => ({ id: tag, label: tag })),
+          ]} /> : null}
+        </View>
+      ) : null}
+      {shown.length ? (
         <View style={styles.grid}>
           {columns.map((col, c) => (
             <View key={c} style={styles.column}>
               {col.map((item) => (
-                <Card key={item.id} item={item} label={label(item)} onPress={() => setOpen(item)} />
+                <Card key={item.id} item={item} label={label(item)} onPress={() => setOpenId(item.id)} onLike={() => void patch(item, { liked: !item.liked })} saving={saving} />
               ))}
             </View>
           ))}
@@ -156,14 +192,14 @@ export function MoodboardView({ page, ask, focusItem, onChanged }: { page: Page;
         <View style={[styles.empty, { borderColor: colors.border }]}>
           <ImageIcon size={28} color={colors.textDim} />
           <Text variant="subtle" center>
-            Nothing on this board yet. Paste a link or an image above, or tap + to add photos.
+            {all.length ? "No items match these filters." : "Nothing on this board yet. Paste a link or an image above, or tap + to add photos."}
           </Text>
         </View>
       )}
 
       <ItemSheet
         visible={Boolean(open)}
-        onClose={() => setOpen(null)}
+        onClose={() => setOpenId(null)}
         title={open ? label(open) : ""}
         subtitle={open?.source && open.source !== label(open) ? open.source : undefined}
         onAsk={(t) => ask(t, open ? { id: open.id, label: label(open) } : undefined)}
@@ -177,7 +213,12 @@ export function MoodboardView({ page, ask, focusItem, onChanged }: { page: Page;
             : []
         }
       >
-        {open ? <Detail item={open} /> : null}
+        {open ? <>
+          <Detail item={open} />
+          <LikeButton item={open} onPress={() => void patch(open, { liked: !open.liked })} disabled={saving} />
+          <TagEditor key={open.id} item={open} suggestions={tags} saving={saving} onSave={(tags) => patch(open, { tags })} />
+          {error ? <Text variant="caption" color={colors.danger} accessibilityRole="alert">{error}</Text> : null}
+        </> : null}
       </ItemSheet>
     </View>
   );
@@ -197,36 +238,78 @@ function useImageUri(item: MoodboardItem): string | null {
   return item.image_url.startsWith("/") ? `${api.baseUrl}${item.image_url}` : item.image_url;
 }
 
-function Card({ item, label, onPress }: { item: MoodboardItem; label: string; onPress: () => void }) {
+function Card({ item, label, onPress, onLike, saving }: { item: MoodboardItem; label: string; onPress: () => void; onLike: () => void; saving: boolean }) {
   const { colors } = useAppTheme();
   const uri = useImageUri(item);
   const waiting = Boolean(item.url && !item.image && item.preview !== "none");
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={({ pressed }) => [styles.card, { backgroundColor: colors.surface, borderColor: colors.border, opacity: pressed ? 0.85 : 1 }]}>
-      {uri ? (
-        <Image source={{ uri }} style={[styles.image, { backgroundColor: colors.surfaceAlt }]} resizeMode="cover" accessibilityIgnoresInvertColors />
-      ) : (
-        <View style={[styles.image, styles.noImage, { backgroundColor: colors.surfaceAlt }]}>
-          {item.url ? <ExternalIcon size={22} color={colors.textDim} /> : <ImageIcon size={22} color={colors.textDim} />}
-          <Text variant="caption" center>
-            {waiting ? "Fetching preview…" : item.url ? hostOf(item.url) : ""}
-          </Text>
-        </View>
-      )}
-      {item.title || item.source || item.url ? (
-        <View style={styles.cardText}>
-          <Text variant="caption" color={colors.text} numberOfLines={2} style={styles.bold}>
-            {label}
-          </Text>
-          {item.source && item.source !== label ? (
-            <Text variant="caption" numberOfLines={1}>
-              {item.source}
+    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}>
+        {uri ? (
+          <Image source={{ uri }} style={[styles.image, { backgroundColor: colors.surfaceAlt }]} resizeMode="cover" accessibilityIgnoresInvertColors />
+        ) : (
+          <View style={[styles.image, styles.noImage, { backgroundColor: colors.surfaceAlt }]}>
+            {item.url ? <ExternalIcon size={22} color={colors.textDim} /> : <ImageIcon size={22} color={colors.textDim} />}
+            <Text variant="caption" center>
+              {waiting ? "Fetching preview…" : item.url ? hostOf(item.url) : ""}
             </Text>
-          ) : null}
-        </View>
-      ) : null}
-    </Pressable>
+          </View>
+        )}
+        {item.title || item.source || item.url ? (
+          <View style={styles.cardText}>
+            <Text variant="caption" color={colors.text} numberOfLines={2} style={styles.bold}>
+              {label}
+            </Text>
+            {item.source && item.source !== label ? (
+              <Text variant="caption" numberOfLines={1}>
+                {item.source}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+      </Pressable>
+      <View style={styles.cardText}>
+        <LikeButton item={item} onPress={onLike} disabled={saving} />
+        {(item.tags ?? []).length ? <Text variant="caption" numberOfLines={2}>{item.tags.join(" · ")}</Text> : null}
+      </View>
+    </View>
   );
+}
+
+function LikeButton({ item, onPress, disabled }: { item: MoodboardItem; onPress: () => void; disabled: boolean }) {
+  const { colors } = useAppTheme();
+  return <Pressable onPress={onPress} disabled={disabled} accessibilityRole="button" accessibilityLabel={item.liked ? "Unlike" : "Like"} accessibilityState={{ selected: Boolean(item.liked), disabled }} style={({ pressed }) => [styles.like, { opacity: disabled ? 0.5 : pressed ? 0.7 : 1 }]}>
+    <HeartIcon size={19} color={item.liked ? colors.accent : colors.textDim} filled={Boolean(item.liked)} />
+    <Text variant="caption" color={item.liked ? colors.accent : colors.textDim}>{item.liked ? "Liked" : "Like"}</Text>
+  </Pressable>;
+}
+
+function TagEditor({ item, suggestions, saving, onSave }: { item: MoodboardItem; suggestions: string[]; saving: boolean; onSave: (tags: string[]) => Promise<boolean> }) {
+  const { colors, fontScale } = useAppTheme();
+  const [draft, setDraft] = useState("");
+  const tags = item.tags ?? [];
+  const addTag = async (value: string) => {
+    const tag = value.trim();
+    if (!tag || saving) return;
+    if (tags.some((existing) => existing.toLowerCase() === tag.toLowerCase())) { setDraft(""); return; }
+    if (await onSave([...tags, tag])) setDraft("");
+  };
+  return <View style={styles.filters}>
+    <Text variant="caption" color={colors.text} style={styles.bold}>Tags</Text>
+    <View style={styles.tagList}>
+      {tags.map((tag) => <Pressable key={tag} disabled={saving} accessibilityRole="button" accessibilityLabel={`Remove tag ${tag}`} onPress={() => void onSave(tags.filter((t) => t !== tag))} style={[styles.tag, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+        <Text variant="caption" color={colors.text}>{tag} ×</Text>
+      </Pressable>)}
+    </View>
+    <View style={[styles.addBar, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}>
+      <TextInput value={draft} onChangeText={setDraft} onSubmitEditing={() => void addTag(draft)} editable={!saving} placeholder="Add a tag…" accessibilityLabel="Add a tag" placeholderTextColor={colors.textFaint} returnKeyType="done" style={[styles.addInput, { color: colors.text, fontSize: scaledFont(16, fontScale) }]} />
+      <Pressable disabled={saving || !draft.trim()} onPress={() => void addTag(draft)} accessibilityRole="button" accessibilityLabel="Add tag" style={[styles.addGo, { backgroundColor: colors.accent, opacity: saving || !draft.trim() ? 0.5 : 1 }]}><Text variant="caption" color={colors.onAccent}>Add</Text></Pressable>
+    </View>
+    {suggestions.some((tag) => !tags.includes(tag)) ? <>
+      <Text variant="caption">Reuse a board tag</Text>
+      <View style={styles.tagList}>{suggestions.filter((tag) => !tags.includes(tag)).map((tag) => <Pressable key={tag} disabled={saving} onPress={() => void addTag(tag)} accessibilityRole="button" accessibilityLabel={`Add tag ${tag}`} style={[styles.tag, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}><Text variant="caption" color={colors.text}>{tag}</Text></Pressable>)}</View>
+    </> : null}
+  </View>;
 }
 
 function Detail({ item }: { item: MoodboardItem }) {
@@ -236,7 +319,6 @@ function Detail({ item }: { item: MoodboardItem }) {
     <View style={styles.detail}>
       {uri ? <Image source={{ uri }} style={[styles.detailImage, { backgroundColor: colors.surfaceAlt }]} resizeMode="contain" accessibilityIgnoresInvertColors /> : null}
       {item.note ? <Text variant="subtle" color={colors.text}>{item.note}</Text> : null}
-      {item.tags.length ? <Text variant="caption">{item.tags.join(" · ")}</Text> : null}
       {item.url ? (
         <Pressable onPress={() => void Linking.openURL(item.url!)} accessibilityRole="link" style={({ pressed }) => [styles.link, { borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}>
           <ExternalIcon size={16} color={colors.text} />
@@ -251,6 +333,10 @@ function Detail({ item }: { item: MoodboardItem }) {
 
 const styles = StyleSheet.create({
   wrap: { gap: space.md },
+  filters: { gap: space.sm },
+  like: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: space.xs },
+  tagList: { flexDirection: "row", flexWrap: "wrap", gap: space.xs },
+  tag: { minHeight: 44, justifyContent: "center", borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.pill, paddingHorizontal: space.md, paddingVertical: space.xs },
   addBar: { flexDirection: "row", alignItems: "center", gap: space.sm, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.xl, paddingLeft: space.sm, paddingRight: space.sm, paddingVertical: 6 },
   addButton: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
   addInput: { flex: 1, paddingVertical: space.sm },

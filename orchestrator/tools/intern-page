@@ -16,6 +16,8 @@
  *   intern-page update <page_id> [--title T] [--summary S] [--data JSON | --data-file F]
  *   intern-page patch-item <page_id> <item_id> --set '{"next_follow_up":"2026-10-09"}'   (null clears a field)
  *   intern-page add-item <page_id> --item '{"id":"p_24","name":"Danny Reyes","company":"Kettle Labs","tags":["lead"]}'
+ *   intern-page patch-item <page_id> <item_id> --set '{"liked":true,"tags":["wrist","use next"]}'
+ *           read current tags with get first; tags replaces the array; liked:false unlikes
  *   intern-page remove-item <page_id> <item_id>
  *   intern-page archive <page_id>
  *
@@ -25,7 +27,7 @@
  *   table   {"columns":[{"key","title","icon?":true}],"rows":[{"id", <key>: value, …}]}
  *   list    {"items":[{"id","text","done?","tags":[],"ts"}]}
  *   draft   the JSON graph-mail draft / revise-draft prints (pass it straight through with --data-file)
- *   moodboard {"items":[{"id","title?","note?","url?","image_path?","source?","tags":[]}]}
+ *   moodboard {"items":[{"id","title?","note?","url?","image_path?","source?","liked?":false,"tags":[]}]}
  *           visual references as image cards. A link gets its preview image fetched; image_path copies a
  *           local image (a shared photo, a downloaded post) onto the board. Each item needs a title, url, image or note.
  *
@@ -227,7 +229,7 @@ async function main() {
 }
 
 const USAGE = [
-  "intern-page create --intern <slug> --kind people|board|table|list|draft --title T [--summary S] (--data JSON | --data-file F) [--no-show]",
+  "intern-page create --intern <slug> --kind people|board|table|list|draft|moodboard --title T [--summary S] (--data JSON | --data-file F) [--no-show]",
   "intern-page list --intern <slug>",
   "intern-page get|show|archive <page_id>",
   "intern-page update <page_id> [--title T] [--summary S] [--data JSON | --data-file F]",

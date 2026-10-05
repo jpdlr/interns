@@ -134,3 +134,13 @@ export function DiscordIcon({ size = 12 }: IconProps) {
     </View>
   );
 }
+
+export function HeartIcon({ size = 22, color, filled = false }: IconProps & { filled?: boolean }) {
+  const { colors } = useAppTheme();
+  const tint = color ?? colors.textDim;
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z" stroke={tint} fill={filled ? tint : "none"} strokeWidth={1.7} strokeLinejoin="round" />
+    </Svg>
+  );
+}

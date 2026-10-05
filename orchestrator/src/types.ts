@@ -359,6 +359,8 @@ export const MoodboardDataSchema = z.object({
           image: z.string().regex(/^(media:[A-Za-z0-9_.-]+|https:\/\/.+)$/, "image is media:<name> or an https URL").optional(),
           source: z.string().max(120).optional(),
           tags: z.array(z.string()).default([]),
+          /** owner shortlist: a reference they want to use */
+          liked: z.boolean().default(false),
           /** who put it on the board */
           by: z.enum(["owner", "intern"]).optional(),
           ts: z.string().optional(),

@@ -14,7 +14,7 @@ process.env.INTERNS_HOME = home;
 
 const { EventBus } = await import("../src/events.js");
 const { Db } = await import("../src/db.js");
-const { validatePageData, addItem } = await import("../src/pages.js");
+const { validatePageData, addItem, patchItem, searchPages } = await import("../src/pages.js");
 const { fillPreviews, ingestImagePath, saveMedia, withMediaUrls, parsePreview, readMedia, signMedia, MediaError } = await import("../src/pagemedia.js");
 import type { PreviewFetch } from "../src/pagemedia.js";
 
@@ -49,6 +49,26 @@ try {
     assert.throws(() => validatePageData("moodboard", { items: [{ id: "a", url: "javascript:alert(1)" }] }), /http/);
     const ok = validatePageData("moodboard", { items: [{ id: "a", url: "https://example.com/x", tags: ["dive"] }] });
     assert.equal((ok.items as unknown[]).length, 1);
+  });
+
+  await check("likes and tags persist, can be cleared, and survive other item edits", () => {
+    const page = db.createPage({ intern: "milo", thread_key: "milo", kind: "moodboard", title: "Picks", summary: "", data: validatePageData("moodboard", { items: [{ id: "pick", title: "Wrist", tags: ["watch"] }] }) });
+    const original = (page.data.items as Record<string, unknown>[])[0]!;
+    assert.equal(original.liked, false, "older boards default to unliked");
+    let updated = patchItem(db, page, "pick", { liked: true });
+    updated = patchItem(db, updated, "pick", { tags: ["watch", "use next"] });
+    updated = patchItem(db, updated, "pick", { note: "Lead frame" });
+    const saved = db.getPage(page.id)!;
+    assert.equal((saved.data.items as Record<string, unknown>[])[0]!.liked, true);
+    assert.deepEqual((saved.data.items as Record<string, unknown>[])[0]!.tags, ["watch", "use next"]);
+    assert.equal(searchPages([saved], "use next")[0]!.item_id, "pick");
+    assert.throws(() => patchItem(db, saved, "pick", { liked: "yes" }), /boolean/);
+    assert.throws(() => patchItem(db, saved, "pick", { tags: [12] }), /string/);
+    updated = patchItem(db, saved, "pick", { liked: false, tags: [] });
+    const cleared = (updated.data.items as Record<string, unknown>[])[0]!;
+    assert.equal(cleared.liked, false);
+    assert.deepEqual(cleared.tags, []);
+    assert.equal(cleared.note, "Lead frame");
   });
 
   await check("images are stored with the page; only real images", () => {
@@ -87,7 +107,7 @@ try {
       summary: "",
       data: validatePageData("moodboard", {
         items: [
-          { id: "r1", url: "https://www.instagram.com/reel/abc/" },
+          { id: "r1", url: "https://www.instagram.com/reel/abc/", liked: true, tags: ["use next"] },
           { id: "r2", url: "https://broken.example/x", title: "Kept title" },
           { id: "r3", title: "Just a note", note: "no link" },
         ],
@@ -105,6 +125,8 @@ try {
     const items = updated!.data.items as Record<string, unknown>[];
     assert.match(String(items[0]!.image), /^media:/);
     assert.equal(items[0]!.title, "blue hour");
+    assert.equal(items[0]!.liked, true);
+    assert.deepEqual(items[0]!.tags, ["use next"]);
     assert.equal(items[0]!.source, "Ocean Diver");
     assert.equal(items[1]!.preview, "none");
     assert.equal(items[1]!.title, "Kept title", "an item's own title wins");
@@ -121,7 +143,7 @@ try {
   });
 
   await check("adding an item keeps working through the normal page functions", () => {
-    const page = db.listPages("milo")[0]!;
+    const page = db.listPages("milo").find((p) => p.title === "References")!;
     const next = addItem(db, page, { id: "r4", title: "Pasted", image: "media:0123456789abcdef.jpg", by: "owner" });
     assert.equal((next.data.items as unknown[]).length, 4);
   });

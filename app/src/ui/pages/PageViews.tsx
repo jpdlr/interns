@@ -217,7 +217,7 @@ function SearchField({ value, onChange, placeholder }: { value: string; onChange
   );
 }
 
-function FilterChips<T extends string>({ options, value, onChange }: { options: { id: T; label: string }[]; value: T; onChange: (v: T) => void }) {
+export function FilterChips<T extends string>({ options, value, onChange }: { options: { id: T; label: string }[]; value: T; onChange: (v: T) => void }) {
   const { colors } = useAppTheme();
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>

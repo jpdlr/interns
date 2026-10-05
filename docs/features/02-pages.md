@@ -133,3 +133,19 @@ Hi Ada, …  (JP's new text)
 
 - Editing pages directly: dragging cards, inline cell edits.
 - Pages shared between interns, and page history or diffs beyond "N changes".
+
+### Moodboard shortlists
+
+Moodboard cards have a Like button, with the same toggle in the item sheet.
+The owner can add or remove tags in the sheet and reuse tags from other items
+on the board. All/Liked and tag filters can be combined to find a shortlist.
+Likes (`liked`, default `false`) and `tags` are saved through the item PATCH
+endpoint, so they persist across devices and are visible to the owning intern.
+Tags are also included in the existing cross-page search.
+
+Interns can read the same likes and tags with `intern-page get` and curate
+references with `intern-page patch-item <page_id> <item_id> --set
+'{"liked":true,"tags":["wrist","use next"]}'`. Set `liked` to `false` to
+unlike. The tags array replaces the previous array, so read it first to retain
+existing tags when adding one. Interns should preserve owner choices during
+unrelated updates and respect the owner's latest instructions.

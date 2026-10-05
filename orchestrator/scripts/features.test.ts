@@ -442,6 +442,27 @@ try {
     assert.equal(findFences(lastMessage("tessa").text, "page")[0]?.id, peopleId);
   });
 
+  await check("pages: interns can read owner likes/tags and curate moodboards through the CLI", async () => {
+    const made = await cli("intern-page", ["create", "--intern", "tessa", "--kind", "moodboard", "--title", "Photo picks", "--no-show", "--data", JSON.stringify({ items: [{ id: "photo", title: "Wrist", tags: ["wrist"] }] })]);
+    assert.ok(made.page_id, JSON.stringify(made));
+    const pageId = made.page_id;
+    const owner = await api(`/pages/${pageId}/items/photo`, { method: "PATCH", body: { set: { liked: true, tags: ["wrist", "lead frame"] } } });
+    assert.equal(owner.status, 200);
+    const read = await cli("intern-page", ["get", pageId]);
+    assert.equal(read.data.items[0].liked, true);
+    assert.deepEqual(read.data.items[0].tags, ["wrist", "lead frame"]);
+    const curated = await cli("intern-page", ["patch-item", pageId, "photo", "--set", JSON.stringify({ liked: false, tags: [...read.data.items[0].tags, "use next"] })]);
+    assert.equal(curated.version, owner.body.version + 1);
+    const seen = (await api(`/pages/${pageId}`)).body.data.items[0];
+    assert.equal(seen.liked, false);
+    assert.deepEqual(seen.tags, ["wrist", "lead frame", "use next"]);
+    await cli("intern-page", ["patch-item", pageId, "photo", "--set", JSON.stringify({ liked: true, tags: ["wrist", "use next"] })]);
+    const final = await cli("intern-page", ["get", pageId]);
+    assert.equal(final.data.items[0].liked, true);
+    assert.deepEqual(final.data.items[0].tags, ["wrist", "use next"]);
+    await cli("intern-page", ["archive", pageId]);
+  });
+
   await check("pages: draft kind accepts graph-mail's JSON as-is", async () => {
     const draft = {
       draft_id: "AAMk1",
