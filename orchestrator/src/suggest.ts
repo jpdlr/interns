@@ -27,8 +27,9 @@ import { extractMentionTokens } from "./mentions.js";
 import type { Registry } from "./registry.js";
 import type { Card, CapabilityRequirement } from "./types.js";
 import { coordinatorName, ownerName } from "./profile.js";
+import { SMALL_MODEL } from "./models.js";
 
-const SUGGEST_MODEL = "claude-haiku-4-5";
+const SUGGEST_MODEL = SMALL_MODEL;
 const WINDOW_DAYS = 14;
 const MAX_SUGGESTIONS = 2;
 const LATER_DAYS = 30;
@@ -285,7 +286,7 @@ export const proposeSuggestions: ProposeFn = async (evidence, memory, db) => {
   try {
     for await (const message of query({
       prompt,
-      options: { systemPrompt: systemPrompt(), model: SUGGEST_MODEL, tools: [], maxTurns: 1, settingSources: [], permissionMode: "bypassPermissions" },
+      options: { systemPrompt: systemPrompt(), model: SUGGEST_MODEL, tools: [], maxTurns: 1, settingSources: [], strictMcpConfig: true, permissionMode: "bypassPermissions" },
     })) {
       if (message.type === "result") {
         for (const usage of Object.values(message.modelUsage ?? {})) {

@@ -11,9 +11,10 @@ import type { Db } from "./db.js";
 import { pageFence } from "./fences.js";
 import type { Page } from "./types.js";
 import { ownerName } from "./profile.js";
+import { SMALL_MODEL } from "./models.js";
 
 export const IDEA_TAGS = ["app", "business", "content", "someday"] as const;
-const TAG_MODEL = "claude-haiku-4-5";
+const TAG_MODEL = SMALL_MODEL;
 const IDEAS_KV = "ideas_page";
 
 /** The idea text when a message is an idea ("idea: …" or "💡 …"), else null. "Idea-wise, …" is not. */
@@ -43,6 +44,7 @@ export const tagIdea: TagFn = async (idea, db) => {
         tools: [],
         maxTurns: 1,
         settingSources: [],
+        strictMcpConfig: true,
         permissionMode: "bypassPermissions",
       },
     })) {

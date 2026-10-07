@@ -81,7 +81,7 @@ export const interviewCandidate: InterviewFn = async (draft, question, history) 
   let costUsd = 0;
   for await (const message of query({
     prompt: `${transcript ? `${transcript}\n\n` : ""}${ownerName()}: ${question}`,
-    options: { systemPrompt, tools: [], allowedTools: [], permissionMode: "default", settingSources: [], maxTurns: 1 },
+    options: { systemPrompt, tools: [], allowedTools: [], permissionMode: "default", settingSources: [], strictMcpConfig: true, maxTurns: 1 },
   })) {
     if (message.type === "result") {
       for (const usage of Object.values(message.modelUsage ?? {})) {
@@ -120,6 +120,7 @@ export async function hire(roughRole: string, taken: string[] = []): Promise<Hir
       allowedTools: [],
       permissionMode: "default",
       settingSources: [],
+      strictMcpConfig: true,
       maxTurns: 1,
     },
   })) {

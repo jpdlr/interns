@@ -10,7 +10,7 @@
  * Verified against @anthropic-ai/claude-agent-sdk sdk.d.ts (see engine.ts's
  * header comment for the general query() shape):
  *  - options.model accepts an alias ('haiku') or a full model ID; we pin the
- *    full id ('claude-haiku-4-5') so a future SDK default change can't
+ *    full id (SMALL_MODEL, models.ts) so a future SDK default change can't
  *    silently upgrade this gate to a pricier tier.
  *  - options.tools: [] disables all built-in tools (distinct from
  *    allowedTools, which only allowlists — tools:[] is the hard "none" knob).
@@ -20,8 +20,9 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { Db } from "./db.js";
 import type { MailMessage } from "./mailwatch.js";
+import { SMALL_MODEL } from "./models.js";
 
-const TRIAGE_MODEL = "claude-haiku-4-5";
+const TRIAGE_MODEL = SMALL_MODEL;
 
 const SYSTEM_PROMPT =
   "You are a fast triage gate for a personal assistant's email inbox. You are shown a batch of " +
@@ -77,6 +78,7 @@ export async function classifyBatch(messages: MailMessage[], db: Db): Promise<"w
         tools: [],
         maxTurns: 1,
         settingSources: [],
+        strictMcpConfig: true,
         permissionMode: "bypassPermissions",
       },
     })) {

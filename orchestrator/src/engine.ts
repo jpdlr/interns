@@ -1,7 +1,7 @@
 /**
  * Agent engine: wraps @anthropic-ai/claude-agent-sdk query() for intern runs.
  *
- * Verified against @anthropic-ai/claude-agent-sdk@0.3.241 sdk.d.ts:
+ * Verified against @anthropic-ai/claude-agent-sdk@0.3.293 sdk.d.ts:
  *  - query({ prompt, options }) is an async iterable of SDKMessage
  *  - the terminal message has type 'result'; subtype 'success' carries
  *    `.result` (text), errors carry subtype 'error_*'
@@ -11,7 +11,7 @@
  *  - options: systemPrompt (plain string ok), cwd, allowedTools, tools,
  *    permissionMode ('default' = conservative), resume, maxTurns, settingSources
  */
-import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
+import { query, type AgentDefinition, type HookCallback, type Options } from "@anthropic-ai/claude-agent-sdk";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +20,7 @@ import type { Db } from "./db.js";
 import { instagramPrompt } from "./instagram.js";
 import { photosPrompt } from "./photos.js";
 import { mailboxEnv, mailboxPrompt } from "./mailboxes.js";
+import { SMALL_MODEL, SMALL_MODEL_CAP_WEIGHT } from "./models.js";
 import { ownerName } from "./profile.js";
 import type { Registry } from "./registry.js";
 import { standingOrdersPrompt } from "./rules.js";
@@ -106,6 +107,76 @@ export function allowedToolsFor(manifest: InternManifest, ownDir?: string): stri
     for (const t of ["Read", "Write", "Edit"]) tools.add(`${t}(/${ownDir}/**)`);
   }
   return [...tools];
+}
+
+/**
+ * The one subagent an intern may start: a helper on SMALL_MODEL for a very
+ * small, mechanical chore (tagging a batch of photos, looking one thing up).
+ * It has the intern's own tools and permissions, minus starting helpers.
+ */
+export const HELPER_AGENT = "helper";
+
+export function helperAgent(owner = ownerName()): AgentDefinition {
+  return {
+    description: `A small, fast model for one very small, mechanical chore with exact instructions (tag a batch of photos, look up one fact, rename a few files). Not for writing, judgement, or anything ${owner} reads.`,
+    prompt: `You are a helper doing one small chore for an intern. Do exactly the task you're given, using the commands and paths it names, then stop.
+Don't message anyone, attach files, create cards or pages, or save rules; that is the intern's job, not yours.
+When you're done, reply with a short plain report: what you did, and anything you couldn't do and why.`,
+    model: SMALL_MODEL,
+    disallowedTools: ["Agent"],
+    maxTurns: 20,
+  };
+}
+
+/**
+ * PreToolUse guard on the Agent tool. The helper is the only subagent, and
+ * the call is rebuilt so its model/effort/isolation overrides can't move it
+ * off SMALL_MODEL. It runs in the foreground: a headless run ends with its
+ * turn, so a background helper's report would be lost.
+ */
+export const helperOnly: HookCallback = async (input) => {
+  if (input.hook_event_name !== "PreToolUse") return {};
+  const args = (input.tool_input ?? {}) as Record<string, unknown>;
+  if (args.subagent_type !== HELPER_AGENT) {
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: `Only the "${HELPER_AGENT}" subagent is available, for very small chores. Do anything bigger yourself.`,
+      },
+    };
+  }
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+      updatedInput: { description: args.description, prompt: args.prompt, subagent_type: HELPER_AGENT, run_in_background: false },
+    },
+  };
+};
+
+/**
+ * A run's usage as it counts against the daily token cap: helper
+ * (SMALL_MODEL) tokens at SMALL_MODEL_CAP_WEIGHT, everything else in full.
+ * The cost is the real cost.
+ */
+export function countUsage(modelUsage: Record<string, { inputTokens: number; outputTokens: number; cacheCreationInputTokens: number; costUSD: number }>): { inputTokens: number; outputTokens: number; costUsd: number } {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let costUsd = 0;
+  for (const [model, usage] of Object.entries(modelUsage)) {
+    const weight = model.startsWith(SMALL_MODEL) ? SMALL_MODEL_CAP_WEIGHT : 1;
+    inputTokens += Math.round((usage.inputTokens + usage.cacheCreationInputTokens) * weight);
+    outputTokens += Math.round(usage.outputTokens * weight);
+    costUsd += usage.costUSD;
+  }
+  return { inputTokens, outputTokens, costUsd };
+}
+
+export function helperPrompt(owner = ownerName()): string {
+  return `
+## Helper
+For a very small, mechanical chore you can hand off, start the Agent tool with subagent_type "${HELPER_AGENT}". It runs on a small, fast model: good for exact, repetitive steps (tagging a batch of about 20 photos, looking up one fact, renaming files), not for writing, choosing, or anything that needs judgement. Give it one exact task, the commands and paths to use, and what to report back. Split a big chore into several helpers and check what they report. Anything for ${owner} (replies, drafts, picks, attachments) you do yourself.`;
 }
 
 /**
@@ -272,6 +343,7 @@ export class SdkEngine implements Engine {
         : "",
       `\n## Links\nWhen you mention a pull request, repository, document, ticket, or other web resource, include its full URL or a descriptive Markdown link so ${ownerName()} can open it directly from your message. Prefer a supplied \`primary_url\`; include useful alternate links when supplied.`,
       richContentPrompt(),
+      helperPrompt(),
       `\nYour slug is \`${slug}\`.`,
       standingOrdersPrompt(this.db.listRules(slug)),
       unreachableColleagues(this.registry, slug),
@@ -284,7 +356,10 @@ export class SdkEngine implements Engine {
       systemPrompt,
       cwd: this.registry.internDir(slug),
       additionalDirectories: [this.registry.memoryDir(slug)],
-      allowedTools: allowedToolsFor(manifest, this.registry.internDir(slug)),
+      allowedTools: [...allowedToolsFor(manifest, this.registry.internDir(slug)), "Agent"],
+      // one subagent, the small-model helper; helperOnly refuses any other
+      agents: { [HELPER_AGENT]: helperAgent() },
+      hooks: { PreToolUse: [{ matcher: "Agent", hooks: [helperOnly] }] },
       // Headless sessions can't answer permission prompts. "dontAsk" (default)
       // runs exactly what allowedTools lists — the catalog grants plus the
       // intern's own dir — and denies everything else. "bypassPermissions"
@@ -294,6 +369,10 @@ export class SdkEngine implements Engine {
       ...(this.config.engine.permission_mode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
       // don't inherit the owner's user/project Claude settings into intern sessions
       settingSources: [],
+      // nor their MCP servers: without this the owner's claude.ai connectors
+      // (Microsoft 365 can send mail) load into every session, and under
+      // bypassPermissions any intern could use them
+      strictMcpConfig: true,
       maxTurns: opts.maxTurns ?? this.config.engine.max_turns,
       ...(this.config.engine.model ? { model: this.config.engine.model } : {}),
       ...(opts.abort ? { abortController: opts.abort } : {}),
@@ -334,11 +413,10 @@ export class SdkEngine implements Engine {
         if (message.type === "result") {
           sessionId = message.session_id ?? null;
           // modelUsage covers main loop + subagents; docs prefer it over .usage
-          for (const usage of Object.values(message.modelUsage ?? {})) {
-            inputTokens += usage.inputTokens + usage.cacheCreationInputTokens;
-            outputTokens += usage.outputTokens;
-            costUsd += usage.costUSD;
-          }
+          const counted = countUsage(message.modelUsage ?? {});
+          inputTokens += counted.inputTokens;
+          outputTokens += counted.outputTokens;
+          costUsd += counted.costUsd;
           if (message.subtype === "success") {
             text = message.result;
           } else {

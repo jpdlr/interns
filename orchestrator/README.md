@@ -47,6 +47,15 @@ See `config.example.json`. Notes:
   outbound send is logged as `[discord dry] …`. Set a `bot_token`, `guild_id`,
   `office_channel_id` and flip `dry_run` to go live. Never commit tokens.
 - `engine.model` empty = Agent SDK default. `max_turns` bounds each run.
+- Every intern can hand a very small, mechanical chore (tagging a batch of
+  photos, one lookup) to a `helper` subagent on Haiku 5.5 (`src/models.ts`,
+  also used by every cheap call: triage, tags, responders, suggestions). It
+  has the intern's own tools and permissions and can't start helpers; a hook
+  refuses any other subagent and drops model overrides. Its tokens count a
+  fortieth against the intern's daily cap (`SMALL_MODEL_CAP_WEIGHT`: Haiku 5.5
+  costs 1/40 of Opus 5.5); recorded cost is the real cost. Never Haiku 4.5.
+- Intern sessions and cheap calls load no MCP servers (`strictMcpConfig`),
+  so the owner's claude.ai connectors never reach an intern.
 - Per-intern budgets live in the manifest (`guardrails.daily_token_cap`);
   when exceeded the engine refuses to start and emits a coordinator card.
 - `push.vapid_public` / `push.vapid_private` — generated once on first run

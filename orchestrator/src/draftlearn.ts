@@ -24,8 +24,9 @@ import { ruleFence } from "./fences.js";
 import { ownerName } from "./profile.js";
 import type { Registry } from "./registry.js";
 import type { Card } from "./types.js";
+import { SMALL_MODEL } from "./models.js";
 
-const LEARN_MODEL = "claude-haiku-4-5";
+const LEARN_MODEL = SMALL_MODEL;
 /** Edits needed before looking for a pattern. */
 export const EDITS_TO_LEARN = 2;
 const SNOOZE_DAYS = 7;
@@ -104,7 +105,7 @@ export const learnFromEdits: LearnFn = async ({ intern, edits, rules, rejected }
   let text = "";
   for await (const message of query({
     prompt,
-    options: { systemPrompt: "You spot editing patterns. You output only strict JSON.", model: LEARN_MODEL, tools: [], maxTurns: 1, settingSources: [] },
+    options: { systemPrompt: "You spot editing patterns. You output only strict JSON.", model: LEARN_MODEL, tools: [], maxTurns: 1, settingSources: [], strictMcpConfig: true },
   })) {
     if (message.type === "result" && message.subtype === "success") text = message.result;
   }
