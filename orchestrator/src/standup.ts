@@ -127,6 +127,7 @@ export async function standup(db: Db, opts: { easterEggs?: boolean; now?: Date }
         allowedTools: [],
         permissionMode: "default",
         settingSources: [],
+        strictMcpConfig: true,
         maxTurns: 1,
       },
     })) {

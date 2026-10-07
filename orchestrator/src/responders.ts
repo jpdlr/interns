@@ -13,8 +13,9 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { Db } from "./db.js";
 import type { Message } from "./types.js";
 import { coordinatorName, ownerName } from "./profile.js";
+import { SMALL_MODEL } from "./models.js";
 
-const RESPONDER_MODEL = "claude-haiku-4-5";
+const RESPONDER_MODEL = SMALL_MODEL;
 
 const systemPrompt = () =>
   `You are the ${coordinatorName()} moderating a group chat between ${ownerName()} (the boss) and their AI interns. ` +
@@ -85,6 +86,7 @@ export const chooseResponders: ChooseRespondersFn = async (room, text, recent, d
         tools: [],
         maxTurns: 1,
         settingSources: [],
+        strictMcpConfig: true,
         permissionMode: "bypassPermissions",
       },
     })) {

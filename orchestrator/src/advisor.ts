@@ -20,8 +20,9 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { Db } from "./db.js";
 import type { Message } from "./types.js";
 import { coordinatorName, ownerName } from "./profile.js";
+import { SMALL_MODEL } from "./models.js";
 
-const ADVISOR_MODEL = "claude-haiku-4-5";
+const ADVISOR_MODEL = SMALL_MODEL;
 
 const systemPrompt = () =>
   "You are the " + coordinatorName() + " deciding what an idle AI intern should work on right now, picking " +
@@ -102,6 +103,7 @@ export async function adviseIdlePriority(
         tools: [],
         maxTurns: 1,
         settingSources: [],
+        strictMcpConfig: true,
         permissionMode: "bypassPermissions",
       },
     })) {

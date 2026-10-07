@@ -69,8 +69,19 @@ and versions follow [Semantic Versioning](https://semver.org/).
   `ig-research` CLI (`instagram` tool): public Business/Creator profiles with recent posts
   and engagement, top and recent posts under a hashtag, and the weekly hashtag quota. It
   has no post, comment or message command.
+- **Helpers for small chores.** An intern can hand a very small, mechanical job (tagging a
+  batch of photos, one lookup) to a helper on Haiku 5.5, and split a big chore across several.
+  The helper has the intern's own tools and permissions and reports back; it can't start
+  helpers of its own, and no other kind of subagent is allowed.
+
+### Changed
+- **Haiku 5.5 for every cheap call.** Mail triage, idea tags, responders, the advisor,
+  suggestions and draft learning move from Haiku 4.5 to Haiku 5.5. Agent SDK 0.3.293.
 
 ### Fixed
+- **Interns no longer get the owner's claude.ai connectors.** Every session loaded them
+  (Microsoft 365 and Claude Docs here), and with `bypassPermissions` an intern, or an email
+  read by triage, could have used them, including sending mail. Sessions now load no MCP servers.
 - **Connectors open at once.** The list waited on GitHub's API every time; GitHub's state is now
   kept for a few minutes, refreshed in the background, and ready at startup. Settings lists every
   connector (Instagram and Google Photos too) with "All connectors" instead of "Something else",
