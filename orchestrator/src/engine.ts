@@ -20,7 +20,7 @@ import type { Db } from "./db.js";
 import { instagramPrompt } from "./instagram.js";
 import { photosPrompt } from "./photos.js";
 import { mailboxEnv, mailboxPrompt } from "./mailboxes.js";
-import { SMALL_MODEL } from "./models.js";
+import { SMALL_MODEL, SMALL_MODEL_CAP_WEIGHT } from "./models.js";
 import { ownerName } from "./profile.js";
 import type { Registry } from "./registry.js";
 import { standingOrdersPrompt } from "./rules.js";
@@ -154,6 +154,24 @@ export const helperOnly: HookCallback = async (input) => {
     },
   };
 };
+
+/**
+ * A run's usage as it counts against the daily token cap: helper
+ * (SMALL_MODEL) tokens at SMALL_MODEL_CAP_WEIGHT, everything else in full.
+ * The cost is the real cost.
+ */
+export function countUsage(modelUsage: Record<string, { inputTokens: number; outputTokens: number; cacheCreationInputTokens: number; costUSD: number }>): { inputTokens: number; outputTokens: number; costUsd: number } {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let costUsd = 0;
+  for (const [model, usage] of Object.entries(modelUsage)) {
+    const weight = model.startsWith(SMALL_MODEL) ? SMALL_MODEL_CAP_WEIGHT : 1;
+    inputTokens += Math.round((usage.inputTokens + usage.cacheCreationInputTokens) * weight);
+    outputTokens += Math.round(usage.outputTokens * weight);
+    costUsd += usage.costUSD;
+  }
+  return { inputTokens, outputTokens, costUsd };
+}
 
 export function helperPrompt(owner = ownerName()): string {
   return `
@@ -395,11 +413,10 @@ export class SdkEngine implements Engine {
         if (message.type === "result") {
           sessionId = message.session_id ?? null;
           // modelUsage covers main loop + subagents; docs prefer it over .usage
-          for (const usage of Object.values(message.modelUsage ?? {})) {
-            inputTokens += usage.inputTokens + usage.cacheCreationInputTokens;
-            outputTokens += usage.outputTokens;
-            costUsd += usage.costUSD;
-          }
+          const counted = countUsage(message.modelUsage ?? {});
+          inputTokens += counted.inputTokens;
+          outputTokens += counted.outputTokens;
+          costUsd += counted.costUsd;
           if (message.subtype === "success") {
             text = message.result;
           } else {

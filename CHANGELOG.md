@@ -72,7 +72,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - **Helpers for small chores.** An intern can hand a very small, mechanical job (tagging a
   batch of photos, one lookup) to a helper on Haiku 5.5, and split a big chore across several.
   The helper has the intern's own tools and permissions and reports back; it can't start
-  helpers of its own, and no other kind of subagent is allowed.
+  helpers of its own, and no other kind of subagent is allowed. Helper tokens count a fortieth
+  against the intern's daily token cap, as Haiku 5.5 costs 1/40 of Opus 5.5.
 
 ### Changed
 - **Haiku 5.5 for every cheap call.** Mail triage, idea tags, responders, the advisor,

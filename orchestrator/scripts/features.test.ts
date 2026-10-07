@@ -39,7 +39,7 @@ const { renderRichBlocks } = await import("../src/render.js");
 const { repoMatches, senderMatches, inQuietHours, holdActive, standingOrdersPrompt } = await import("../src/rules.js");
 const { awaySummaries, isDecision, localDate } = await import("../src/agenda.js");
 const { ideaText } = await import("../src/ideas.js");
-const { TOOLS_DIR, allowedToolsFor, CapExceededError, HELPER_AGENT, helperAgent, helperOnly } = await import("../src/engine.js");
+const { TOOLS_DIR, allowedToolsFor, CapExceededError, HELPER_AGENT, helperAgent, helperOnly, countUsage } = await import("../src/engine.js");
 const { SMALL_MODEL } = await import("../src/models.js");
 const { OVER_BUDGET } = await import("../src/db.js");
 import type { Engine, RunResult } from "../src/engine.js";
@@ -703,6 +703,16 @@ try {
     for (const subagent_type of ["general-purpose", "Explore", "fork", undefined]) {
       assert.equal((await call({ description: "x", prompt: "y", subagent_type })).hookSpecificOutput.permissionDecision, "deny", String(subagent_type));
     }
+  });
+
+  await check("engine: helper tokens count a fortieth against the daily cap; cost stays real", () => {
+    const counted = countUsage({
+      "claude-opus-5-5": { inputTokens: 1000, cacheCreationInputTokens: 200, outputTokens: 300, costUSD: 0.05 },
+      "claude-haiku-5-5": { inputTokens: 3000, cacheCreationInputTokens: 1000, outputTokens: 800, costUSD: 0.001 },
+    });
+    assert.equal(counted.inputTokens, 1200 + 100);
+    assert.equal(counted.outputTokens, 300 + 20);
+    assert.ok(Math.abs(counted.costUsd - 0.051) < 1e-9);
   });
 
   await check("away summaries are deterministic one-liners", () => {
