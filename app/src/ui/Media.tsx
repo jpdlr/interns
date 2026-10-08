@@ -49,6 +49,9 @@ type VideoElement = HTMLVideoElement & { webkitEnterFullscreen?: () => void };
  * A video. `inline`: muted, looping, no controls, playing only while at least
  * half of it is on screen (the thread). Otherwise controls and sound, playing
  * while `active` (the viewer's current page). Native shows the poster.
+ *
+ * The poster image sits underneath and the <video> stays invisible until it
+ * has a frame to paint: a fresh <video> paints black first, which flashed.
  */
 export function InlineVideo({
   uri,
@@ -57,6 +60,7 @@ export function InlineVideo({
   height,
   inline = false,
   active = true,
+  load = true,
   accessibilityLabel,
 }: {
   uri: string;
@@ -65,22 +69,46 @@ export function InlineVideo({
   height: number;
   inline?: boolean;
   active?: boolean;
+  /** false: just the poster, for now (the player joins it later without replacing it) */
+  load?: boolean;
   accessibilityLabel?: string;
 }) {
   const ref = useRef<VideoElement | null>(null);
+  const [shown, setShown] = useState(false);
 
   useEffect(() => {
     const video = ref.current;
     if (!video) return;
-    // React doesn't reflect `muted` as an attribute, and iOS only autoplays muted video that has it
-    video.muted = inline;
-    video.defaultMuted = inline;
-    if (inline) video.setAttribute("muted", "");
+    const show = () => setShown(true);
+    if (video.readyState >= 2) show();
+    video.addEventListener("loadeddata", show);
+    video.addEventListener("playing", show);
+    return () => {
+      video.removeEventListener("loadeddata", show);
+      video.removeEventListener("playing", show);
+    };
+  }, [uri, load]);
+
+  useEffect(() => {
+    const video = ref.current;
+    if (!video) return;
     if (!inline) {
-      if (active) void video.play().catch(() => {});
-      else video.pause();
+      if (!active) {
+        video.pause();
+        return;
+      }
+      // With sound when the browser allows it; iOS refuses sound without a
+      // tap (a swipe isn't one), so it then plays muted: tap the speaker.
+      video.play().catch(() => {
+        video.muted = true;
+        video.play().catch(() => setShown(true)); // can't play at all: show the controls
+      });
       return;
     }
+    // React doesn't reflect `muted` as an attribute, and iOS only autoplays muted video that has it
+    video.muted = true;
+    video.defaultMuted = true;
+    video.setAttribute("muted", "");
     if (typeof IntersectionObserver === "undefined") {
       void video.play().catch(() => {});
       return;
@@ -94,22 +122,40 @@ export function InlineVideo({
     );
     observer.observe(video);
     return () => observer.disconnect();
-  }, [inline, active, uri]);
+  }, [inline, active, uri, load]);
 
   if (Platform.OS !== "web") {
     return <FadeImage uri={poster} style={{ width, height }} accessibilityLabel={accessibilityLabel} />;
   }
-  return React.createElement("video", {
-    ref,
-    src: uri,
-    poster,
-    playsInline: true,
-    loop: inline,
-    controls: !inline,
-    preload: inline ? "metadata" : "auto",
-    "aria-label": accessibilityLabel,
-    style: { width, height, objectFit: inline ? "cover" : "contain", display: "block", backgroundColor: "#000", pointerEvents: inline ? "none" : "auto" },
-  });
+  return (
+    <View style={{ width, height }}>
+      <FadeImage uri={poster} style={{ width, height }} resizeMode={inline ? "cover" : "contain"} accessibilityLabel={accessibilityLabel} />
+      {load ? (
+        <View style={{ position: "absolute", top: 0, left: 0, width, height }}>
+          {React.createElement("video", {
+            ref,
+            src: uri,
+            poster,
+            playsInline: true,
+            loop: inline,
+            controls: !inline,
+            preload: inline ? "metadata" : "auto",
+            "aria-label": accessibilityLabel,
+            style: {
+              width,
+              height,
+              objectFit: inline ? "cover" : "contain",
+              display: "block",
+              backgroundColor: "transparent",
+              opacity: shown ? 1 : 0,
+              transition: "opacity 120ms ease-out",
+              pointerEvents: inline ? "none" : "auto",
+            },
+          })}
+        </View>
+      ) : null}
+    </View>
+  );
 }
 
 const MAX_ZOOM = 4;

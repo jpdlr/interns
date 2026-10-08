@@ -378,6 +378,11 @@ const reelAtt = reel
   ? attachmentMeta("milo", "intern", process.env.MOCK_VIDEO?.endsWith(".webm") ? "reel.webm" : "reel.mp4", process.env.MOCK_VIDEO?.endsWith(".webm") ? "video/webm" : "video/mp4", reel.bytes, { message_id: "m13", width: reel.width, height: reel.height, duration: Math.round(reel.duration * 10) / 10, caption: "Climber in the mist, one take", link: "https://www.instagram.com/reel/demo-climb/" })
   : null;
 if (reelAtt) attachments.get(reelAtt.id).poster = reel.poster;
+// The same reel inside the gallery of found posts, so swiping crosses a video.
+const reelInGallery = reel
+  ? attachmentMeta("milo", "intern", reelAtt.name, reelAtt.mime, reel.bytes, { message_id: "m11", width: reel.width, height: reel.height, duration: reelAtt.duration, caption: "The reel, between two stills", link: reelAtt.link })
+  : null;
+if (reelInGallery) attachments.get(reelInGallery.id).poster = reel.poster;
 // Three options to pick between (a pick block names them).
 const pickAtts = [
   ["lead-window.png", [30, 34, 44], [214, 196, 170], "Wing over haze"],
@@ -424,7 +429,7 @@ const messages = {
     { id: "m9", intern: "milo", author: "intern", ts: iso(700e3), surface: "system",
       text: "Two versions. Both keep your best line.\n\n**⭐ My pick — 112 chars**\n```\nDesign • Coffee • Bikes\nUsually sketching, riding, or fixing something.\nCape Town\n```\nScannable header, your line, home.\n\n**Shorter — 74 chars**\n```\nDesigner. Usually sketching, riding, or fixing something.\n```\n\nSay which and I'll update the profile." },
     { id: "m10", intern: "milo", author: "jp", text: "Find me a few posts in my style?", ts: iso(500e3), surface: "app" },
-    { id: "m11", intern: "milo", author: "intern", ts: iso(480e3), surface: "system", attachments: postAtts,
+    { id: "m11", intern: "milo", author: "intern", ts: iso(480e3), surface: "system", attachments: reelInGallery ? [...postAtts.slice(0, 2), reelInGallery, ...postAtts.slice(2)] : postAtts,
       text: "Seven posts closest to your look: small figures in big views, muted colour, the window seat. Tap one to swipe through; each opens on Instagram." },
     { id: "m12", intern: "milo", author: "intern", ts: iso(470e3), surface: "system", attachments: [],
       text: "And the references board, updated:\n\n```page\n{\"id\":\"pg_refs\",\"title\":\"References — reels you sent\",\"kind\":\"moodboard\"}\n```" },

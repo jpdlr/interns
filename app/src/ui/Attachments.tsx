@@ -621,16 +621,11 @@ function ViewerContent({ attachment, api, maxW, maxH, active, onZoomChange }: { 
       w = Math.round(h * aspect);
     }
     if (attachment.kind === "video") {
-      // the poster stays underneath, so starting and stopping never shows black
+      // The player is made the first time you land on the video and kept,
+      // paused, when you swipe on: removing it put the opening frame back
+      // mid-swipe, and a new one painted black.
       return (
-        <View style={{ width: w, height: h }}>
-          <FadeImage uri={api.previewUrl(attachment, w)} style={{ width: w, height: h }} resizeMode="contain" accessibilityLabel={attachment.caption ?? attachment.name} />
-          {active ? (
-            <View style={StyleSheet.absoluteFill}>
-              <InlineVideo uri={api.attachmentUrl(attachment)} poster={api.previewUrl(attachment, w)} width={w} height={h} active accessibilityLabel={attachment.caption ?? attachment.name} />
-            </View>
-          ) : null}
-        </View>
+        <InlineVideo uri={api.attachmentUrl(attachment)} poster={api.previewUrl(attachment, w)} width={w} height={h} active={active} load={visited} accessibilityLabel={attachment.caption ?? attachment.name} />
       );
     }
     // a screen-sized copy at once; the full picture fades in over it the first time you land on it
