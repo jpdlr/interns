@@ -361,6 +361,7 @@ export function AttachmentViewer({ attachment, gallery, api, onClose, onReply }:
   const [boards, setBoards] = useState<PageHeader[] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const scroller = useRef<ScrollView>(null);
+  const laidOutWidth = useRef(0);
 
   const startIndex = attachment ? Math.max(0, pages.findIndex((a) => a.id === attachment.id)) : 0;
   useEffect(() => setIndex(startIndex), [startIndex, attachment]);
@@ -478,7 +479,12 @@ export function AttachmentViewer({ attachment, gallery, api, onClose, onReply }:
             onScroll={onScroll}
             scrollEventThrottle={32}
             contentOffset={{ x: startIndex * width, y: 0 }}
-            onLayout={() => scroller.current?.scrollTo({ x: index * width, animated: false })}
+            onLayout={(e) => {
+              // only when the screen width changes (rotation): mid-swipe it would yank the pager
+              if (e.nativeEvent.layout.width === laidOutWidth.current) return;
+              laidOutWidth.current = e.nativeEvent.layout.width;
+              scroller.current?.scrollTo({ x: index * width, animated: false });
+            }}
             style={{ width }}
           >
             {pages.map((att, i) => (
@@ -498,10 +504,13 @@ export function AttachmentViewer({ attachment, gallery, api, onClose, onReply }:
             </Pressable>
           ) : null}
         </View>
-        {current.caption ? (
-          <Text variant="subtle" color="rgba(250,250,250,0.85)" center numberOfLines={3} style={styles.viewerCaption}>
-            {current.caption}
-          </Text>
+        {/* a fixed slot: captions of different lengths must not resize the pages mid-swipe */}
+        {pages.some((a) => a.caption) ? (
+          <View style={styles.viewerCaptionSlot}>
+            <Text variant="subtle" color="rgba(250,250,250,0.85)" center numberOfLines={3} style={styles.viewerCaption}>
+              {current.caption ?? ""}
+            </Text>
+          </View>
         ) : null}
         {many ? (
           <View style={styles.viewerDots}>
@@ -581,6 +590,12 @@ export function AttachmentViewer({ attachment, gallery, api, onClose, onReply }:
 function ViewerContent({ attachment, api, maxW, maxH, active, onZoomChange }: { attachment: Attachment; api: InternsApi; maxW: number; maxH: number; active: boolean; onZoomChange: (zoomed: boolean) => void }) {
   const { colors } = useAppTheme();
   const [svgSource, setSvgSource] = useState<string | null>(null);
+  // Once a page has been on screen it keeps its full picture: swapping images
+  // as pages come and go is what made swiping flash.
+  const [visited, setVisited] = useState(active);
+  useEffect(() => {
+    if (active) setVisited(true);
+  }, [active]);
 
   useEffect(() => {
     setSvgSource(null);
@@ -606,15 +621,30 @@ function ViewerContent({ attachment, api, maxW, maxH, active, onZoomChange }: { 
       w = Math.round(h * aspect);
     }
     if (attachment.kind === "video") {
-      return active ? (
-        <InlineVideo uri={api.attachmentUrl(attachment)} poster={api.previewUrl(attachment, w)} width={w} height={h} active accessibilityLabel={attachment.caption ?? attachment.name} />
-      ) : (
-        <FadeImage uri={api.previewUrl(attachment, w)} style={{ width: w, height: h }} resizeMode="contain" accessibilityLabel={attachment.caption ?? attachment.name} />
+      // the poster stays underneath, so starting and stopping never shows black
+      return (
+        <View style={{ width: w, height: h }}>
+          <FadeImage uri={api.previewUrl(attachment, w)} style={{ width: w, height: h }} resizeMode="contain" accessibilityLabel={attachment.caption ?? attachment.name} />
+          {active ? (
+            <View style={StyleSheet.absoluteFill}>
+              <InlineVideo uri={api.attachmentUrl(attachment)} poster={api.previewUrl(attachment, w)} width={w} height={h} active accessibilityLabel={attachment.caption ?? attachment.name} />
+            </View>
+          ) : null}
+        </View>
       );
     }
-    // the full picture once you're on it; a screen-sized one while swiping past
-    const uri = active && attachment.mime !== "image/gif" ? api.attachmentUrl(attachment) : api.previewUrl(attachment, w);
-    return <ZoomableImage uri={uri} width={w} height={h} accessibilityLabel={attachment.caption ?? attachment.name} onZoomChange={active ? onZoomChange : undefined} resetKey={active} />;
+    // a screen-sized copy at once; the full picture fades in over it the first time you land on it
+    return (
+      <ZoomableImage
+        uri={api.previewUrl(attachment, w)}
+        fullUri={visited ? api.attachmentUrl(attachment) : null}
+        width={w}
+        height={h}
+        accessibilityLabel={attachment.caption ?? attachment.name}
+        onZoomChange={active ? onZoomChange : undefined}
+        resetKey={active}
+      />
+    );
   }
   if (attachment.kind === "svg") {
     return !svgSource ? (
@@ -762,7 +792,8 @@ const styles = StyleSheet.create({
   viewerDot: { width: 6, height: 6, borderRadius: 3 },
   viewerSvg: { padding: space.xs },
   viewerFile: { alignItems: "center", gap: space.sm, padding: space.xl, borderRadius: radius.xl, maxWidth: 320 },
-  viewerCaption: { paddingHorizontal: space.xl, marginBottom: space.md },
+  viewerCaption: { paddingHorizontal: space.xl },
+  viewerCaptionSlot: { height: 66, justifyContent: "flex-start", marginBottom: space.sm },
   viewerActions: { flexDirection: "row", justifyContent: "space-around", paddingHorizontal: space.md, maxWidth: 520, width: "100%", alignSelf: "center" },
   viewerAction: { alignItems: "center", gap: 4, minWidth: 56, minHeight: 44, paddingVertical: 4 },
   viewerToast: { alignSelf: "center", backgroundColor: "#fafafa", borderRadius: radius.pill, paddingHorizontal: space.lg, paddingVertical: space.xs + 2, marginBottom: space.md },

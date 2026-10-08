@@ -122,13 +122,17 @@ const DOUBLE_TAP_MS = 300;
  */
 export function ZoomableImage({
   uri,
+  fullUri,
   width,
   height,
   accessibilityLabel,
   onZoomChange,
   resetKey,
 }: {
+  /** what shows at once: a screen-sized copy */
   uri: string;
+  /** the full picture, faded in over `uri` once it has loaded; it stays from then on */
+  fullUri?: string | null;
   width: number;
   height: number;
   accessibilityLabel?: string;
@@ -274,6 +278,7 @@ export function ZoomableImage({
     <View ref={frame} style={{ width, height, overflow: "visible" } as StyleProp<ViewStyle>}>
       <View ref={inner} style={{ width, height }}>
         <FadeImage uri={uri} style={{ width, height }} resizeMode="contain" accessibilityLabel={accessibilityLabel} />
+        {fullUri && fullUri !== uri ? <FadeImage uri={fullUri} style={{ position: "absolute", top: 0, left: 0, width, height }} resizeMode="contain" /> : null}
       </View>
     </View>
   );
