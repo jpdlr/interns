@@ -25,6 +25,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r tools/requirements.txt
+      # video posters, lengths and thumbnails (src/media.ts) and their tests
+      - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ffmpeg
       - run: npm ci
       - run: npm run typecheck
       - run: npm test

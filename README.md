@@ -119,6 +119,8 @@ Claude. Interns run on the [Claude Agent SDK](https://docs.claude.com/en/docs/ag
 so either sign in once with [Claude Code](https://docs.claude.com/en/docs/claude-code) on
 this machine (`npx @anthropic-ai/claude-code`, then `/login`) or set `ANTHROPIC_API_KEY`
 in the orchestrator's environment. Python 3.10+ is needed only for the Outlook tools.
+[ffmpeg](https://ffmpeg.org) is optional: with it, videos in the chat get posters and
+lengths, and pictures load as small thumbnails first.
 
 ```sh
 git clone https://github.com/jpdlr/interns.git
