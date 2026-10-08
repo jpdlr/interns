@@ -50,8 +50,10 @@ See `config.example.json`. Notes:
 - Every intern can hand a very small, mechanical chore (tagging a batch of
   photos, one lookup) to a `helper` subagent on Haiku 5.5 (`src/models.ts`,
   also used by every cheap call: triage, tags, responders, suggestions). It
-  has the intern's own tools and permissions and can't start helpers; a hook
-  refuses any other subagent and drops model overrides. Its tokens count a
+  has the intern's own tools and permissions and can't start helpers. For
+  bigger research an intern can start the built-in `general-purpose`
+  subagent on its own model (tokens count in full). A hook refuses any other
+  subagent and drops model overrides. Its tokens count a
   fortieth against the intern's daily cap (`SMALL_MODEL_CAP_WEIGHT`: Haiku 5.5
   costs 1/40 of Opus 5.5); recorded cost is the real cost. Never Haiku 4.5.
 - Intern sessions and cheap calls load no MCP servers (`strictMcpConfig`),
@@ -148,7 +150,17 @@ is hydrated on every read and on the `message` SSE event.
   from disk"). The dir is inside the intern's cwd, so `fs.read` covers it
   and Claude's Read tool shows images.
 - **Intern → owner.** `tools/intern-attach --intern <slug> --file <path>
-  [--caption …]` uploads with `author=intern`. The CLI is a *base tool*
+  [--caption …] [--link <url>]` uploads with `author=intern`; `--link` is the
+  page the picture comes from (an Instagram post), shown as "Open on <host>".
+  Several pictures on one reply show as a grid the owner swipes through.
+  Video (mp4/mov/webm) is probed with ffprobe on upload; `GET /attachments/:id`
+  serves byte ranges, `?poster=1` (a video's opening frame) and `?w=<px>` (a
+  JPEG scaled to 320/640/1080, cached under `attachments/.derived/`), all made
+  with ffmpeg (`src/media.ts`). `POST /attachments/:id/like` and
+  `/save-to-board` back the viewer's Love and Keep; a message can quote one
+  picture (`quote_attachment_id`), and the intern's task gets its path.
+  `GET /link-preview?url=` returns a card for an Instagram post, its image kept
+  under `link-previews/` (`src/linkpreview.ts`). The CLI is a *base tool*
   (`BASE_TOOL_NAMES` in engine.ts): every intern gets it without a manifest
   entry. Anything uploaded during a run and still unlinked when the reply
   lands is linked to that reply (`linkOrphanInternAttachments`), and the

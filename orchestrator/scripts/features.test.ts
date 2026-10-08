@@ -39,7 +39,7 @@ const { renderRichBlocks } = await import("../src/render.js");
 const { repoMatches, senderMatches, inQuietHours, holdActive, standingOrdersPrompt } = await import("../src/rules.js");
 const { awaySummaries, isDecision, localDate } = await import("../src/agenda.js");
 const { ideaText } = await import("../src/ideas.js");
-const { TOOLS_DIR, allowedToolsFor, CapExceededError, HELPER_AGENT, helperAgent, helperOnly, countUsage } = await import("../src/engine.js");
+const { TOOLS_DIR, allowedToolsFor, CapExceededError, HELPER_AGENT, RESEARCH_AGENT, helperAgent, subagentGuard, countUsage } = await import("../src/engine.js");
 const { SMALL_MODEL } = await import("../src/models.js");
 const { OVER_BUDGET } = await import("../src/db.js");
 import type { Engine, RunResult } from "../src/engine.js";
@@ -690,17 +690,20 @@ try {
     assert.ok(tools.includes(`Bash(${TOOLS_DIR}/intern-page *)`) && tools.includes(`Bash(${TOOLS_DIR}/intern-rule *)`));
   });
 
-  await check("engine: the helper subagent is Haiku 5.5, the only one, always in the foreground", async () => {
+  await check("engine: subagents are the Haiku 5.5 helper and general-purpose only, always in the foreground", async () => {
     assert.equal(SMALL_MODEL, "claude-haiku-5-5");
     assert.equal(helperAgent().model, SMALL_MODEL);
     assert.deepEqual(helperAgent().disallowedTools, ["Agent"], "a helper can't start helpers");
+    assert.equal(RESEARCH_AGENT, "general-purpose");
     const signal = new AbortController().signal;
     const call = (tool_input: Record<string, unknown>) =>
-      helperOnly({ hook_event_name: "PreToolUse", tool_name: "Agent", tool_input, tool_use_id: "t1", session_id: "s", transcript_path: "", cwd: "" } as never, "t1", { signal }) as Promise<any>;
-    const ok = (await call({ description: "Tag photos", prompt: "tag 1-20", subagent_type: HELPER_AGENT, model: "opus", effort: "max", isolation: "remote" })).hookSpecificOutput;
-    assert.equal(ok.permissionDecision, "allow");
-    assert.deepEqual(ok.updatedInput, { description: "Tag photos", prompt: "tag 1-20", subagent_type: HELPER_AGENT, run_in_background: false }, "model/effort/isolation overrides dropped");
-    for (const subagent_type of ["general-purpose", "Explore", "fork", undefined]) {
+      subagentGuard({ hook_event_name: "PreToolUse", tool_name: "Agent", tool_input, tool_use_id: "t1", session_id: "s", transcript_path: "", cwd: "" } as never, "t1", { signal }) as Promise<any>;
+    for (const subagent_type of [HELPER_AGENT, RESEARCH_AGENT]) {
+      const ok = (await call({ description: "Tag photos", prompt: "tag 1-20", subagent_type, model: "haiku", effort: "max", isolation: "remote", run_in_background: true })).hookSpecificOutput;
+      assert.equal(ok.permissionDecision, "allow", subagent_type);
+      assert.deepEqual(ok.updatedInput, { description: "Tag photos", prompt: "tag 1-20", subagent_type, run_in_background: false }, "model/effort/isolation overrides dropped");
+    }
+    for (const subagent_type of ["Explore", "Plan", "fork", undefined]) {
       assert.equal((await call({ description: "x", prompt: "y", subagent_type })).hookSpecificOutput.permissionDecision, "deny", String(subagent_type));
     }
   });

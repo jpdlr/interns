@@ -174,7 +174,7 @@ export type CardState = z.infer<typeof CardStateSchema>;
  * this row is the metadata surfaces render from. `kind` is derived from the
  * MIME type so renderers pick a viewer without sniffing.
  */
-export const AttachmentKindSchema = z.enum(["image", "svg", "file"]);
+export const AttachmentKindSchema = z.enum(["image", "svg", "video", "file"]);
 export type AttachmentKind = z.infer<typeof AttachmentKindSchema>;
 
 export const AttachmentSchema = z.object({
@@ -193,9 +193,15 @@ export const AttachmentSchema = z.object({
   ext: z.string(),
   /** optional caption/alt text supplied by the uploader */
   caption: z.string().nullable().default(null),
-  /** image pixel size when known (header sniff) */
+  /** the web page it comes from (an Instagram post, an article), shown as "Open on <host>" */
+  link: z.string().nullable().default(null),
+  /** image pixel size when known (header sniff; ffprobe for video) */
   width: z.number().int().positive().nullable().default(null),
   height: z.number().int().positive().nullable().default(null),
+  /** video length in seconds */
+  duration: z.number().nonnegative().nullable().default(null),
+  /** hearted by the owner in the viewer; interns read these as taste (picturesPrompt) */
+  liked: z.coerce.boolean().default(false),
   created_at: z.string(),
   /** app-relative download URL carrying its own signature (attachments.ts) */
   url: z.string().default(""),
@@ -226,6 +232,9 @@ export const MessageSchema = z.object({
   ts: z.string(), // ISO 8601
   surface: z.enum(["app", "discord", "system"]),
   attachments: z.array(AttachmentSchema).default([]),
+  /** the picture this message is about: JP replying to one picture, or picking one */
+  quote_attachment: z.string().nullable().default(null),
+  quoted_attachment: AttachmentSchema.nullable().default(null),
   /** why an intern spoke: answering JP ("reply"), asking him something ("ask"), or on its own ("work") — drives notifications */
   cause: z.enum(["reply", "ask", "work"]).nullable().default(null),
 });

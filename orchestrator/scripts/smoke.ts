@@ -7,6 +7,7 @@
  *   npm run smoke
  */
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -32,6 +33,8 @@ const { collectEvidence, runSuggestions, isSuppressed, loadMemory, wireSuggestio
 const { chartToSvg, normalizeChartSpec } = await import("../src/chartsvg.js");
 const { mermaidToSvg } = await import("../src/mermaidsvg.js");
 const { InternManifestSchema } = await import("../src/types.js");
+const { picturesPrompt } = await import("../src/reactions.js");
+const { plainFences } = await import("../src/fences.js");
 const { ICONS } = await import("../src/icons.js");
 const { DiscordAdapter } = await import("../src/discord.js");
 const { PushService } = await import("../src/push.js");
@@ -502,6 +505,14 @@ await check("archive moves intern to _fired", () => {
     github: apiGithub as never,
     orchestrator: apiOrchestrator,
     home: apiHome,
+    // link cards: one Instagram post page and its image; everything else 404s
+    previewFetch: async (url: string) => {
+      const png1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+      const html = `<meta property="og:title" content="Northwind Outfitters on Instagram: &quot;Wing over haze&quot;"><meta property="og:image" content="https://cdn.example/wing.png">`;
+      const ok = url === "https://www.instagram.com/p/demo-post/" || url === "https://cdn.example/wing.png";
+      const body = url.endsWith(".png") ? png1x1 : Buffer.from(html);
+      return { ok, headers: { get: () => null }, text: async () => body.toString(), arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.length) as ArrayBuffer };
+    },
   });
   const addr = apiApp.server.address();
   const base = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : apiConfig.port}`;
@@ -627,6 +638,122 @@ await check("archive moves intern to _fired", () => {
       assert.deepEqual(emitted, [`${reply.id}:0`, `${reply.id}:1`]);
       assert.equal(apiDb.getMessage(reply.id)!.attachments[0]!.id, up.body.id);
       assert.equal((await apiFetch("/interns/nova/attachments")).body.length, 3);
+    });
+    await check("attachments: an image keeps its source link; only http(s) links are taken", async () => {
+      const post = "https://www.instagram.com/p/demo-post/";
+      const linked = await upload("nova", "post.png", png, "image/png", `&link=${encodeURIComponent(post)}`);
+      assert.equal(linked.status, 201);
+      assert.equal(linked.body.link, post);
+      assert.equal(apiDb.getAttachment(linked.body.id)!.link, post);
+      assert.equal((await upload("nova", "plain.png", png, "image/png")).body.link, null);
+      assert.equal((await upload("nova", "bad.png", png, "image/png", `&link=${encodeURIComponent("javascript:alert(1)")}`)).status, 400);
+    });
+    await check("attachments: a video is probed, gets a poster, and streams in ranges", async () => {
+      const mp4 = path.join(apiHome, "clip.mp4");
+      execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=180x320:rate=10", "-t", "1.5", "-pix_fmt", "yuv420p", mp4]);
+      const bytes = fs.readFileSync(mp4);
+      const up = await upload("nova", "clip.mp4", bytes, "application/octet-stream");
+      assert.equal(up.status, 201);
+      assert.equal(up.body.kind, "video");
+      assert.equal(up.body.mime, "video/mp4");
+      assert.equal(up.body.width, 180);
+      assert.equal(up.body.height, 320);
+      assert.ok(up.body.duration > 1 && up.body.duration < 2, String(up.body.duration));
+      const url = `${base}${up.body.url}`;
+      const range = await fetch(url, { headers: { Range: "bytes=0-99" } });
+      assert.equal(range.status, 206);
+      assert.equal(range.headers.get("content-range"), `bytes 0-99/${bytes.length}`);
+      assert.equal(Buffer.from(await range.arrayBuffer()).equals(bytes.subarray(0, 100)), true);
+      const tail = await fetch(url, { headers: { Range: "bytes=-10" } });
+      assert.equal(Buffer.from(await tail.arrayBuffer()).equals(bytes.subarray(bytes.length - 10)), true);
+      assert.equal((await fetch(url, { headers: { Range: `bytes=${bytes.length}-` } })).status, 416);
+      const posterRes = await fetch(`${url}&poster=1`);
+      assert.equal(posterRes.status, 200);
+      assert.equal(posterRes.headers.get("content-type"), "image/jpeg");
+      assert.equal(imageSize("image/jpeg", Buffer.from(await posterRes.arrayBuffer()))?.width, 180);
+      assert.equal((await fetch(`${base}/attachments/${uploadedId}?sig=${signAttachment(apiConfig.api_token, uploadedId)}&poster=1`)).status, 400);
+    });
+    await check("attachments: ?w= serves a smaller JPEG of a picture; the original stays as it was", async () => {
+      const big = path.join(apiHome, "big.png");
+      execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=1600x1200", "-frames:v", "1", big]);
+      const up = await upload("nova", "big.png", fs.readFileSync(big), "image/png");
+      const small = await fetch(`${base}${up.body.url}&w=500`);
+      assert.equal(small.headers.get("content-type"), "image/jpeg");
+      const size = imageSize("image/jpeg", Buffer.from(await small.arrayBuffer()));
+      assert.deepEqual(size, { width: 640, height: 480 }, "rounded up to the 640 step");
+      const full = await fetch(`${base}${up.body.url}`);
+      assert.equal(full.headers.get("content-type"), "image/png");
+      assert.equal(Number(full.headers.get("content-length")), fs.statSync(big).size);
+    });
+    await check("attachments: a heart is kept, re-emitted with its message and read as taste", async () => {
+      const up = await upload("nova", "liked.png", png, "image/png", `&caption=${encodeURIComponent("Wing over haze")}&link=${encodeURIComponent("https://www.instagram.com/p/abc/")}`);
+      const sent = await apiFetch("/interns/nova/messages", { method: "POST", body: { text: "this one", attachment_ids: [up.body.id] } });
+      const emitted: boolean[] = [];
+      const off = apiBus.on("message", (m) => m.id === sent.body.message.id && emitted.push(m.attachments[0]!.liked));
+      const liked = await apiFetch(`/attachments/${up.body.id}/like`, { method: "POST", body: { liked: true } });
+      off();
+      assert.equal(liked.body.liked, true);
+      assert.deepEqual(emitted, [true]);
+      const prompt = picturesPrompt(apiDb, "nova");
+      assert.match(prompt, /Pictures .* hearted/);
+      assert.match(prompt, /"Wing over haze" \(https:\/\/www\.instagram\.com\/p\/abc\/\)/);
+      await apiFetch(`/attachments/${up.body.id}/like`, { method: "POST", body: { liked: false } });
+      assert.equal(picturesPrompt(apiDb, "nova"), "");
+      assert.equal((await apiFetch(`/attachments/${up.body.id}/like`, { method: "POST", body: {} })).status, 400);
+    });
+    await check("attachments: save to board makes the thread's Saved pictures board once, video as its poster", async () => {
+      const pic = await upload("nova", "keep.png", png, "image/png", `&link=${encodeURIComponent("https://www.instagram.com/p/keep/")}&caption=Keep`);
+      const first = await apiFetch(`/attachments/${pic.body.id}/save-to-board`, { method: "POST", body: {} });
+      assert.equal(first.status, 200, JSON.stringify(first.body));
+      assert.equal(first.body.page.title, "Saved pictures");
+      const again = await apiFetch(`/attachments/${pic.body.id}/save-to-board`, { method: "POST", body: {} });
+      assert.equal(again.body.page.id, first.body.page.id);
+      assert.equal(again.body.already, true);
+      const clip = (await apiFetch("/interns/nova/attachments")).body.find((a: any) => a.kind === "video");
+      const video = await apiFetch(`/attachments/${clip.id}/save-to-board`, { method: "POST", body: { page_id: first.body.page.id } });
+      assert.equal(video.status, 200, JSON.stringify(video.body));
+      const board = apiDb.getPage(first.body.page.id)!;
+      const items = board.data.items as any[];
+      assert.equal(items.length, 2);
+      assert.equal(items[0].url, "https://www.instagram.com/p/keep/");
+      assert.equal(items[0].title, "Keep");
+      assert.equal(items[0].liked, true);
+      assert.ok(String(items[1].image).startsWith("media:") && String(items[1].image).endsWith(".jpg"));
+      assert.equal(apiDb.listPages("nova").filter((p) => p.title === "Saved pictures").length, 1);
+    });
+    await check("messages: a reply can quote one picture; the intern gets its file", async () => {
+      const pic = await upload("nova", "pick.png", png, "image/png", "&caption=Option%20two");
+      await apiFetch("/interns/nova/messages", { method: "POST", body: { text: "options", attachment_ids: [pic.body.id] } });
+      const sent = await apiFetch("/interns/nova/messages", { method: "POST", body: { text: "Picked: Option two", quote_attachment_id: pic.body.id } });
+      assert.equal(sent.status, 200);
+      assert.equal(sent.body.message.quote_attachment, pic.body.id);
+      assert.equal(sent.body.message.quoted_attachment.caption, "Option two");
+      const history = await apiFetch("/interns/nova/messages");
+      assert.equal(history.body.find((m: any) => m.id === sent.body.message.id).quoted_attachment.id, pic.body.id);
+      const task = (apiDb.sqlite.prepare("SELECT id FROM tasks WHERE payload LIKE ?").get(`%${sent.body.message.id}%`) as { id: string } | undefined)!;
+      const payload = apiDb.getTask(task.id)!.payload.quoted_picture as { path: string; caption: string };
+      assert.ok(payload.path.endsWith(`${pic.body.id}.png`));
+      assert.equal(payload.caption, "Option two");
+      assert.equal((await apiFetch("/interns/nova/messages", { method: "POST", body: { text: "x", quote_attachment_id: "nope" } })).status, 400);
+    });
+    await check("link previews: an Instagram post gets a card with a kept image; other links don't", async () => {
+      const post = "https://www.instagram.com/p/demo-post/";
+      const card = await apiFetch(`/link-preview?url=${encodeURIComponent(post)}`);
+      assert.equal(card.status, 200, JSON.stringify(card.body));
+      assert.equal(card.body.title, "Wing over haze");
+      assert.equal(card.body.source, "Northwind Outfitters");
+      const image = await fetch(`${base}${card.body.image_url}`);
+      assert.equal(image.status, 200);
+      assert.equal(image.headers.get("content-type"), "image/png");
+      assert.equal((await fetch(`${base}${card.body.image_url.replace(/sig=.*/, "sig=0")}`)).status, 401);
+      assert.equal((await apiFetch(`/link-preview?url=${encodeURIComponent("https://example.com/a")}`)).status, 404);
+      assert.equal((await apiFetch(`/link-preview?url=${encodeURIComponent("https://www.instagram.com/p/gone/")}`)).status, 404);
+      assert.equal((await apiFetch("/link-preview?url=javascript:1")).status, 400);
+    });
+    await check("fences: a pick block reads as a numbered list off the app", () => {
+      const text = 'Two options.\n\n```pick\n{"question":"Which leads?","options":[{"attachment":"a1","label":"Wing"},{"attachment":"a2","label":"Rock"}]}\n```';
+      assert.equal(plainFences(text), "Two options.\n\n**Which leads?**\n1. Wing\n2. Rock\n_Reply with the number you want._");
+      assert.equal(plainFences(text, "push"), "Two options.\n\nWhich leads?");
     });
     // ---- rooms + mentions
     let roomId = "";

@@ -5,7 +5,7 @@
 import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
-import { createReadStream, existsSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { notFoundPage, resolvePage } from "./appshell.js";
@@ -14,7 +14,9 @@ import { learnedView, ownerSetStyle, reactTo, ReactionError, undoStyleChange } f
 import { registerConnectorRoutes, unknownMailboxes, type ConnectorService } from "./connectors.js";
 import { registerPhotosRoutes, type GooglePhotos } from "./photos.js";
 import { registerDriveSyncRoutes, type DriveSync } from "./drivesync.js";
-import { fillPreviews, ingestImagePath, MediaError, readMedia, saveMedia, mediaUrl, signMedia, withMediaUrls } from "./pagemedia.js";
+import { fillPreviews, ingestImagePath, MediaError, readMedia, saveMedia, mediaUrl, signMedia, withMediaUrls, type PreviewFetch } from "./pagemedia.js";
+import { LinkPreviews, signLinkPreview } from "./linkpreview.js";
+import { poster, probeVideo, thumbnail, thumbWidth } from "./media.js";
 import { z } from "zod";
 import type { ApprovalService } from "./approvals.js";
 import {
@@ -27,6 +29,7 @@ import {
   safeName,
   sha256,
   verifyAttachmentSig,
+  webLink,
 } from "./attachments.js";
 import type { CapabilityService } from "./capabilities.js";
 import { calendarMailbox, internsHome, repoRoot, saveConfig, timeZone, type Config } from "./config.js";
@@ -246,6 +249,8 @@ export async function startApi(deps: {
   /** idea tagging call — Haiku by default; tests inject a fake */
   tagFn?: TagFn;
   /** tests: stands in for the model in POST /hire/interview */
+  /** link-card fetches (tests point it at a fake) */
+  previewFetch?: PreviewFetch;
   interviewFn?: InterviewFn;
   /** Connectors (Outlook sign-in, GitHub App): its routes live in connectors.ts */
   connectors?: ConnectorService;
@@ -258,6 +263,9 @@ export async function startApi(deps: {
   const calendar = deps.calendar ?? cachedCalendar(calendarMailbox(config));
   const tagFn = deps.tagFn ?? tagIdea;
   const attachments = new AttachmentStore(deps.home ?? internsHome());
+  const linkPreviews = new LinkPreviews(deps.home ?? internsHome(), () => config.api_token, deps.previewFetch);
+  /** the board pictures from the chat are kept on, one per thread */
+  const SAVED_BOARD = "Saved pictures";
   const app = Fastify({ logger: false, bodyLimit: MAX_ATTACHMENT_BYTES + 4096 });
 
   // Uploads arrive as a raw body on the attachments route; the body is
@@ -273,7 +281,7 @@ export async function startApi(deps: {
   await app.register(cors, { origin: true });
 
   /** Paths that are API (bearer-token gated); everything else is the static app shell. */
-  const API_PREFIXES = ["/interns", "/tasks", "/cards", "/activity", "/hire", "/events", "/meta", "/push", "/capabilities", "/github", "/webhooks", "/attachments", "/rooms", "/reports", "/suggest", "/messages", "/pages", "/rules", "/agenda", "/ideas", "/notify", "/owner", "/templates", "/connectors"];
+  const API_PREFIXES = ["/interns", "/tasks", "/cards", "/activity", "/hire", "/events", "/meta", "/push", "/capabilities", "/github", "/webhooks", "/attachments", "/rooms", "/reports", "/suggest", "/messages", "/pages", "/rules", "/agenda", "/ideas", "/notify", "/owner", "/templates", "/connectors", "/link-preview", "/link-previews"];
   /** A thread key is an intern slug, a live room id, or the coordinator's front desk. */
   const threadExists = (key: string) => key === "coordinator" || Boolean(registry.get(key)) || Boolean(db.getRoom(key)?.archived_at === null);
   const isApiPath = (url: string) => API_PREFIXES.some((p) => url === p || url.startsWith(`${p}/`) || url.startsWith(`${p}?`));
@@ -308,6 +316,13 @@ export async function startApi(deps: {
       const parsed = new URL(req.url, "http://localhost");
       const id = decodeURIComponent(parsed.pathname.slice("/attachments/".length));
       if (verifyAttachmentSig(config.api_token, id, parsed.searchParams.get("sig") ?? undefined)) return;
+    }
+    // Link-card images, signed per key (linkpreview.ts).
+    const card = req.method === "GET" ? /^\/link-previews\/([0-9a-f]{24})(?:\?|$)/.exec(req.url) : null;
+    if (card) {
+      const sig = new URL(req.url, "http://localhost").searchParams.get("sig") ?? "";
+      const expected = signLinkPreview(config.api_token, card[1]!);
+      if (sig.length === expected.length && sig === expected) return;
     }
     // Moodboard images, signed per page and file (pagemedia.ts).
     const media = req.method === "GET" ? /^\/pages\/([^/]+)\/media\/([^/?]+)/.exec(req.url) : null;
@@ -488,7 +503,13 @@ export async function startApi(deps: {
 
   app.post<{ Params: { slug: string } }>("/interns/:slug/messages", async (req, reply) => {
     const body = z
-      .object({ text: z.string().default(""), attachment_ids: z.array(z.string().min(1)).max(20).default([]), reply_to: z.string().nullable().optional() })
+      .object({
+        text: z.string().default(""),
+        attachment_ids: z.array(z.string().min(1)).max(20).default([]),
+        reply_to: z.string().nullable().optional(),
+        /** the picture JP is replying about, or picked (a pick block) */
+        quote_attachment_id: z.string().nullable().optional(),
+      })
       .safeParse(req.body);
     if (!body.success || (!body.data.text.trim() && body.data.attachment_ids.length === 0)) {
       return reply.code(400).send({ error: "text or attachment_ids required" });
@@ -502,6 +523,10 @@ export async function startApi(deps: {
     }
     const quotedMsg = body.data.reply_to ? db.getMessage(body.data.reply_to) : undefined;
     const replyTo = quotedMsg?.intern === req.params.slug ? quotedMsg.id : null;
+    const quotedPicture = body.data.quote_attachment_id ? db.getAttachment(body.data.quote_attachment_id) : undefined;
+    if (body.data.quote_attachment_id && (!quotedPicture || quotedPicture.intern !== req.params.slug)) {
+      return reply.code(400).send({ error: "unknown quoted attachment", detail: body.data.quote_attachment_id });
+    }
     const message = db.addMessage({
       intern: req.params.slug,
       author: "jp",
@@ -509,6 +534,7 @@ export async function startApi(deps: {
       surface: "app",
       reply_to: replyTo,
       attachmentIds: body.data.attachment_ids,
+      quote_attachment: quotedPicture?.id ?? null,
     });
 
     // "idea: …" / "💡 …" in any chat is filed on the Ideas page, not sent to an intern.
@@ -557,7 +583,20 @@ export async function startApi(deps: {
     const quoted = replyTo && quotedMsg
       ? { quoted: { id: quotedMsg.id, author: quotedMsg.author, speaker: quotedMsg.speaker, text: quotedMsg.text.slice(0, 1000) } }
       : {};
-    const targets = await orchestrator.fanOutFromJp(req.params.slug, body.data.text, { ...extra, ...quoted, ...debriefExtra, reply_to: message.id });
+    // The one picture JP means ("more like this one", a pick): its file, so the intern can look at it.
+    const picture = quotedPicture
+      ? {
+          quoted_picture: {
+            id: quotedPicture.id,
+            name: quotedPicture.name,
+            kind: quotedPicture.kind,
+            caption: quotedPicture.caption,
+            link: quotedPicture.link,
+            path: attachments.pathFor(quotedPicture.intern, quotedPicture.id, quotedPicture.ext),
+          },
+        }
+      : {};
+    const targets = await orchestrator.fanOutFromJp(req.params.slug, body.data.text, { ...extra, ...quoted, ...picture, ...debriefExtra, reply_to: message.id });
     const first = targets[0] ? db.currentTask(targets[0]) : undefined;
     return { message, task_id: first?.id ?? "", targets };
   });
@@ -567,13 +606,13 @@ export async function startApi(deps: {
   /**
    * Upload one file as a raw request body. Metadata rides in the query
    * string so nothing needs a multipart parser:
-   *   POST /interns/:slug/attachments?name=chart.svg&author=jp&caption=...
+   *   POST /interns/:slug/attachments?name=chart.svg&author=jp&caption=...&link=https://...
    *   Content-Type: image/svg+xml (or application/octet-stream)
    * Returns the Attachment. It stays unlinked until a message claims it
    * (`attachment_ids` on POST /messages for JP; the intern's next reply for
    * interns — see orchestrator.ts).
    */
-  app.post<{ Params: { slug: string }; Querystring: { name?: string; author?: string; caption?: string } }>(
+  app.post<{ Params: { slug: string }; Querystring: { name?: string; author?: string; caption?: string; link?: string } }>(
     "/interns/:slug/attachments",
     async (req, reply) => {
       const { slug } = req.params;
@@ -588,10 +627,14 @@ export async function startApi(deps: {
       const mime = resolveMime(req.headers["content-type"], name, bytes);
       const kind = kindFor(mime);
       const ext = extensionFor(name, mime);
-      const size = imageSize(mime, bytes);
       const id = randomUUID();
-      attachments.write(slug, id, ext, bytes);
+      const file = attachments.write(slug, id, ext, bytes);
+      const video = kind === "video" ? await probeVideo(file) : null;
+      const size = video ?? imageSize(mime, bytes);
+      if (kind === "video") void poster(file); // ready before the app asks
       const caption = typeof req.query.caption === "string" && req.query.caption.trim() ? req.query.caption.trim().slice(0, 500) : null;
+      const link = req.query.link ? webLink(req.query.link) : null;
+      if (req.query.link && !link) return reply.code(400).send({ error: "link must be an http(s) URL" });
       const record = db.createAttachment({
         id,
         intern: slug,
@@ -603,8 +646,10 @@ export async function startApi(deps: {
         sha256: sha256(bytes),
         ext,
         caption,
+        link,
         width: size?.width ?? null,
         height: size?.height ?? null,
+        duration: video?.duration ?? null,
       });
       return reply.code(201).send({ ...record, path: attachments.pathFor(slug, id, ext) });
     },
@@ -622,26 +667,126 @@ export async function startApi(deps: {
     return att;
   });
 
-  /** Bytes. `?download=1` forces a save-as; otherwise images/SVG/PDF/text display inline. */
-  app.get<{ Params: { id: string }; Querystring: { download?: string; sig?: string } }>("/attachments/:id", async (req, reply) => {
+  /**
+   * Bytes. `?download=1` forces a save-as; otherwise images/SVG/video/PDF/text
+   * display inline. `?poster=1` is a video's opening frame; `?w=<px>` a
+   * smaller JPEG of a picture or poster (media.ts), else the original. Range
+   * requests are honoured: Safari won't play a video without them.
+   */
+  app.get<{ Params: { id: string }; Querystring: { download?: string; sig?: string; w?: string; poster?: string } }>("/attachments/:id", async (req, reply) => {
     const att = db.getAttachment(req.params.id);
     if (!att) return reply.code(404).send({ error: "no such attachment" });
-    const file = attachments.locate(att.intern, att.id, att.ext);
-    if (!file) return reply.code(410).send({ error: "attachment bytes are gone" });
+    const original = attachments.locate(att.intern, att.id, att.ext);
+    if (!original) return reply.code(410).send({ error: "attachment bytes are gone" });
     const download = req.query.download === "1" || req.query.download === "true";
-    const inlineOk = att.kind === "image" || att.kind === "svg" || att.mime === "application/pdf" || att.mime.startsWith("text/");
+    let file = original;
+    let type = att.mime;
+    if (!download && req.query.poster === "1") {
+      if (att.kind !== "video") return reply.code(400).send({ error: "only videos have posters" });
+      const frame = await poster(original);
+      if (!frame) return reply.code(404).send({ error: "no poster for this video" });
+      file = frame;
+      type = "image/jpeg";
+    }
+    const width = Number(req.query.w);
+    const scalable = type === "image/jpeg" || type === "image/png" || type === "image/webp" || type === "image/bmp";
+    if (!download && width > 0 && scalable) {
+      const small = await thumbnail(file, thumbWidth(width));
+      if (small) {
+        file = small;
+        type = "image/jpeg";
+      }
+    }
+    const inlineOk = att.kind === "image" || att.kind === "svg" || att.kind === "video" || att.mime === "application/pdf" || att.mime.startsWith("text/");
     const disposition = `${download || !inlineOk ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(att.name)}`;
     // text/html would run as a same-origin page with access to the app's
     // storage — serve it as plain text unless explicitly downloaded.
-    const type = att.mime === "text/html" && !download ? "text/plain; charset=utf-8" : att.mime;
-    return reply
+    if (type === "text/html" && !download) type = "text/plain; charset=utf-8";
+    const total = file === original ? att.size : statSync(file).size;
+    reply
       .header("Content-Type", type)
-      .header("Content-Length", String(att.size))
+      .header("Accept-Ranges", "bytes")
       .header("Content-Disposition", disposition)
       .header("Cache-Control", "private, max-age=31536000, immutable")
       .header("X-Content-Type-Options", "nosniff")
-      .header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
-      .send(createReadStream(file));
+      .header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? "").trim());
+    if (range && (range[1] || range[2])) {
+      // "bytes=a-b", "bytes=a-" or the last n bytes, "bytes=-n"
+      const start = range[1] ? Number(range[1]) : Math.max(0, total - Number(range[2]));
+      const end = range[1] && range[2] ? Math.min(Number(range[2]), total - 1) : total - 1;
+      if (start >= total || start > end) return reply.code(416).header("Content-Range", `bytes */${total}`).send();
+      return reply
+        .code(206)
+        .header("Content-Range", `bytes ${start}-${end}/${total}`)
+        .header("Content-Length", String(end - start + 1))
+        .send(createReadStream(file, { start, end }));
+    }
+    return reply.header("Content-Length", String(total)).send(createReadStream(file));
+  });
+
+  /** Heart a picture in the viewer (or take the heart back). */
+  app.post<{ Params: { id: string } }>("/attachments/:id/like", async (req, reply) => {
+    const body = z.object({ liked: z.boolean() }).safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: "liked (true/false) required" });
+    const att = db.setAttachmentLiked(req.params.id, body.data.liked);
+    if (!att) return reply.code(404).send({ error: "no such attachment" });
+    return att;
+  });
+
+  /**
+   * Keep a picture from the chat on a moodboard: `page_id`, or the thread's
+   * "Saved pictures" board (made on first use). A video goes on as its
+   * opening frame, linked to its post.
+   */
+  app.post<{ Params: { id: string } }>("/attachments/:id/save-to-board", async (req, reply) => {
+    const body = z.object({ page_id: z.string().min(1).optional() }).safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: "invalid request" });
+    const att = db.getAttachment(req.params.id);
+    if (!att) return reply.code(404).send({ error: "no such attachment" });
+    if (att.kind !== "image" && att.kind !== "video") return reply.code(400).send({ error: "only pictures and videos go on a board" });
+    const original = attachments.locate(att.intern, att.id, att.ext);
+    const source = original && att.kind === "video" ? await poster(original) : original;
+    if (!source) return reply.code(410).send({ error: "attachment bytes are gone" });
+    let page = body.data.page_id ? db.getPage(body.data.page_id) : db.listPages(att.intern).find((p) => p.kind === "moodboard" && p.title === SAVED_BOARD);
+    if (body.data.page_id && (!page || page.kind !== "moodboard")) return reply.code(404).send({ error: "no such moodboard" });
+    try {
+      if (!page) {
+        const owner = registry.get(att.intern) ? att.intern : (db.getMessage(att.message_id ?? "")?.speaker ?? null);
+        if (!owner) return reply.code(400).send({ error: "no intern to keep the board" });
+        page = db.createPage({ intern: owner, thread_key: att.intern, kind: "moodboard", title: SAVED_BOARD, summary: "Pictures you kept from the chat", data: validatePageData("moodboard", { items: [] }) });
+      }
+      const item = {
+        id: `att_${att.id.slice(0, 8)}`,
+        image: `media:${saveMedia(mediaHome, page.id, readFileSync(source))}`,
+        ...(att.link ? { url: att.link } : {}),
+        ...(att.caption ? { title: att.caption.slice(0, 90) } : {}),
+        liked: true,
+        by: "owner",
+        tags: [],
+      };
+      const existing = ((page.data.items as { id?: string }[] | undefined) ?? []).some((i) => i.id === item.id);
+      const updated = existing ? page : addItem(db, page, item);
+      return { page: pageHeader(updated), item_id: item.id, already: existing };
+    } catch (err) {
+      return pageErr(reply, err);
+    }
+  });
+
+  /** A card for a link in a message (Instagram posts for now): title, account, a kept copy of the image. */
+  app.get<{ Querystring: { url?: string } }>("/link-preview", async (req, reply) => {
+    const url = req.query.url ? webLink(req.query.url) : null;
+    if (!url) return reply.code(400).send({ error: "url must be an http(s) URL" });
+    const preview = await linkPreviews.get(url);
+    if (!preview) return reply.code(404).send({ error: "no preview for this link" });
+    return preview;
+  });
+
+  app.get<{ Params: { key: string } }>("/link-previews/:key", async (req, reply) => {
+    const image = linkPreviews.image(req.params.key);
+    if (!image) return reply.code(404).send({ error: "no such image" });
+    return reply
+      .header("Content-Type", image.type).header("Cache-Control", "private, max-age=31536000, immutable").send(createReadStream(image.file));
   });
 
   app.get<{ Params: { slug: string } }>("/interns/:slug/manifest", async (req, reply) => {

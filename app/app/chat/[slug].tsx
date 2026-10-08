@@ -28,6 +28,8 @@ import { radius, space, useAppTheme } from "../../src/theme";
 import { clockTime, dayKey, dayLabel } from "../../src/time";
 import { loadSeen, markSeen } from "../../src/unread";
 import { AttachmentViewer, PendingAttachments, filesFromDataTransfer, pickFiles, type PendingUpload } from "../../src/ui/Attachments";
+import { InstagramPreviewCard, instagramLinks } from "../../src/ui/LinkPreview";
+import { FadeImage } from "../../src/ui/Media";
 import { Bubble, DayDivider, useThreadIndent } from "../../src/ui/Bubble";
 import { Button } from "../../src/ui/Button";
 import { CardView } from "../../src/ui/CardView";
@@ -119,10 +121,13 @@ export default function ChatScreen() {
   const [unseenCount, setUnseenCount] = useState(0);
   /** files staged in the composer, uploading or uploaded, not yet sent */
   const [uploads, setUploads] = useState<PendingUpload[]>([]);
-  const [viewing, setViewing] = useState<Attachment | null>(null);
+  const [viewing, setViewing] = useState<{ attachment: Attachment; gallery: Attachment[] } | null>(null);
+  const openAttachment = useCallback((attachment: Attachment, gallery: Attachment[]) => setViewing({ attachment, gallery }), []);
   const [dragging, setDragging] = useState(false);
   /** the message JP is answering (rooms): shown above the composer, sent as reply_to */
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  /** the one picture JP's reply is about (Reply in the viewer), sent as quote_attachment_id */
+  const [replyingPicture, setReplyingPicture] = useState<Attachment | null>(null);
   /** measured y of every message row, for "jump to the quoted message" */
   const rowY = useRef(new Map<string, number>());
   const [jumpTarget, setJumpTarget] = useState<string | null>(null);
@@ -596,7 +601,7 @@ export default function ChatScreen() {
     setTick(Date.now());
     stickToBottom();
     try {
-      const result = await api.sendMessage(slug, optimistic.text, (optimistic.attachments ?? []).map((a) => a.id), optimistic.reply_to ?? null);
+      const result = await api.sendMessage(slug, optimistic.text, (optimistic.attachments ?? []).map((a) => a.id), optimistic.reply_to ?? null, optimistic.quote_attachment ?? null);
       setPending((current) => current.filter((p) => p.message.id !== optimistic.id));
       setMessages((current) =>
         current.some((m) => m.id === result.message.id) ? current : [...current, result.message],
@@ -623,7 +628,7 @@ export default function ChatScreen() {
    * and failure handling as the composer; rejects when it was not sent so the
    * block can unlock.
    */
-  const sendText = useCallback(async (text: string, replyTo: string | null) => {
+  const sendText = useCallback(async (text: string, replyTo: string | null, quoted: Attachment | null = null) => {
     if (!slug) return;
     const optimistic: Message = {
       id: `pending-${Date.now()}`,
@@ -634,6 +639,8 @@ export default function ChatScreen() {
       surface: "app",
       attachments: [],
       reply_to: replyTo,
+      quote_attachment: quoted?.id ?? null,
+      quoted_attachment: quoted,
     };
     setPending((current) => [...current, { message: optimistic }]);
     if (!(await deliver(optimistic))) throw new Error("not sent");
@@ -653,14 +660,17 @@ export default function ChatScreen() {
       surface: "app",
       attachments: readyAttachments,
       reply_to: replyingTo?.id ?? null,
+      quote_attachment: replyingPicture?.id ?? null,
+      quoted_attachment: replyingPicture,
     };
     setReplyingTo(null);
+    setReplyingPicture(null);
     setDraft("");
     void clearDraft(slug);
     setUploads((current) => current.filter((u) => u.error)); // failed ones stay for a retry
     setPending((current) => [...current, { message: optimistic }]);
     await deliver(optimistic);
-  }, [deliver, draft, slug, sending, readyAttachments, uploadsBusy, replyingTo, ideaMode]);
+  }, [deliver, draft, slug, sending, readyAttachments, uploadsBusy, replyingTo, replyingPicture, ideaMode]);
 
   const retryPending = useCallback(async (message: Message) => {
     if (sending) return;
@@ -674,6 +684,7 @@ export default function ChatScreen() {
     setPending((current) => current.filter((p) => p.message.id !== message.id));
     setDraft(message.text);
     if (message.reply_to) setReplyingTo(messages.find((m) => m.id === message.reply_to) ?? null);
+    setReplyingPicture(message.quoted_attachment ?? null);
   }, [messages]);
 
   const discardPending = useCallback((message: Message) => {
@@ -782,7 +793,19 @@ export default function ChatScreen() {
   const RUN_GAP_MS = 5 * 60_000;
   const draftEmpty = draft.trim().length === 0;
   const pickQuickReply = useCallback((reply: { text: string }) => setDraft(reply.text), []);
-  const setReplyTarget = useCallback((message: Message) => setReplyingTo(message), []);
+  const setReplyTarget = useCallback((message: Message) => {
+    setReplyingTo(message);
+    setReplyingPicture(null);
+  }, []);
+  /** Reply in the viewer: answer the message the picture came with, about that picture. */
+  const replyAboutPicture = useCallback(
+    (attachment: Attachment) => {
+      setViewing(null);
+      setReplyingTo(messages.find((m) => m.id === attachment.message_id) ?? null);
+      setReplyingPicture(attachment);
+    },
+    [messages],
+  );
   const onUpdatedCard = useCallback((updated: Card) => setCards((current) => current.map((card) => card.id === updated.id ? updated : card)), []);
   const onRowLayout = useCallback((messageId: string, event: LayoutChangeEvent) => {
     rowY.current.set(messageId, event.nativeEvent.layout.y);
@@ -877,7 +900,10 @@ export default function ChatScreen() {
               messageId: message.id,
               speaker: message.speaker ?? null,
               answered: answered.has(message.id),
-              reply: (text) => sendText(text, message.id),
+              reply: (text, opts) => sendText(text, message.id, message.attachments.find((a) => a.id === opts?.quoteAttachmentId) ?? null),
+              attachments: message.attachments,
+              api,
+              openAttachment,
               compose: (text) => {
                 setReplyingTo(message);
                 setDraft(text);
@@ -894,7 +920,7 @@ export default function ChatScreen() {
             failed={isFailed}
             highlighted={message.id === highlightedMessageId}
             api={api}
-            onOpenAttachment={setViewing}
+            onOpenAttachment={openAttachment}
             replyTo={quotesPrevious ? null : quoteOf(message.reply_to)}
             onPressReplyTo={setJumpTarget}
             onReply={!isPending && !isFailed ? setReplyTarget : undefined}
@@ -916,6 +942,9 @@ export default function ChatScreen() {
           {resources.map((reference) => (
             <ResourceLinkPreviewCard key={reference.url} reference={reference} mine={message.author === "jp"} />
           ))}
+          {instagramLinks(message.text).map((url) => (
+            <InstagramPreviewCard key={url} api={api} url={url} mine={message.author === "jp"} />
+          ))}
           {message.id === latestIncomingId && draftEmpty && !waiting && !/```(quick-replies|checklist)/.test(message.text) ? (
             <QuickReplyChips replies={suggestQuickReplies(message.text)} onSelect={pickQuickReply} indent={quickReplyIndent} />
           ) : null}
@@ -924,7 +953,7 @@ export default function ChatScreen() {
     });
     return nodes;
     // `draftEmpty`, not `draft`: typing must not rebuild every row.
-  }, [messages, pending, cards, faceId, intern?.name, slug, runCardAction, onUpdatedCard, targetMessageId, unreadAnchorId, highlightedMessageId, onRowLayout, api, draftEmpty, waiting, speakerOf, isRoom, quoteOf, setReplyTarget, openMenu, retryPending, pickQuickReply, quickReplyIndent, sendText]);
+  }, [messages, pending, cards, faceId, intern?.name, slug, runCardAction, onUpdatedCard, targetMessageId, unreadAnchorId, highlightedMessageId, onRowLayout, api, draftEmpty, waiting, speakerOf, isRoom, quoteOf, setReplyTarget, openMenu, retryPending, pickQuickReply, quickReplyIndent, sendText, openAttachment]);
 
   if (!ready) return <Loading />;
 
@@ -1199,17 +1228,31 @@ export default function ChatScreen() {
                 </Text>
               </View>
             ) : null}
-            {replyingTo ? (
+            {replyingTo || replyingPicture ? (
               <View style={[styles.replyBar, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+                {replyingPicture ? (
+                  <FadeImage uri={api.previewUrl(replyingPicture, 40)} style={styles.replyBarPicture} accessibilityLabel={replyingPicture.name} />
+                ) : null}
                 <View style={styles.replyBarText}>
                   <Text variant="caption" color={colors.text} style={styles.replyBarWho}>
-                    {`Replying to ${quoteOf(replyingTo.id)?.who ?? ""}`}
+                    {replyingPicture
+                      ? `Replying about this ${replyingPicture.kind === "video" ? "video" : "picture"}`
+                      : `Replying to ${quoteOf(replyingTo!.id)?.who ?? ""}`}
                   </Text>
                   <Text variant="caption" numberOfLines={1}>
-                    {quoteOf(replyingTo.id)?.snippet ?? ""}
+                    {replyingPicture ? (replyingPicture.caption ?? replyingPicture.name) : (quoteOf(replyingTo!.id)?.snippet ?? "")}
                   </Text>
                 </View>
-                <Pressable onPress={() => setReplyingTo(null)} accessibilityRole="button" accessibilityLabel="Cancel reply" hitSlop={8} style={styles.iconButton}>
+                <Pressable
+                  onPress={() => {
+                    setReplyingTo(null);
+                    setReplyingPicture(null);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel reply"
+                  hitSlop={8}
+                  style={styles.iconButton}
+                >
                   <XIcon size={18} color={colors.textDim} />
                 </Pressable>
               </View>
@@ -1282,7 +1325,7 @@ export default function ChatScreen() {
           </View>
         </View>
       )}
-      <AttachmentViewer attachment={viewing} api={api} onClose={() => setViewing(null)} />
+      <AttachmentViewer attachment={viewing?.attachment ?? null} gallery={viewing?.gallery} api={api} onClose={() => setViewing(null)} onReply={replyAboutPicture} />
       <Modal visible={Boolean(menuFor)} transparent animationType="fade" onRequestClose={() => setMenuFor(null)}>
         <Pressable style={[styles.sheetBackdrop, { backgroundColor: colors.overlay }]} onPress={() => setMenuFor(null)} accessibilityLabel="Close message menu">
           <Pressable style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border, paddingBottom: Math.max(insets.bottom, space.lg) }]} onPress={() => {}}>
@@ -1518,6 +1561,7 @@ const styles = StyleSheet.create({
   mentionAllIcon: { width: 22, height: 22, alignItems: "center", justifyContent: "center" },
   replyBar: { flexDirection: "row", alignItems: "center", gap: space.md, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, paddingHorizontal: space.md, paddingVertical: space.sm, marginBottom: space.sm },
   replyBarText: { flex: 1, gap: 1 },
+  replyBarPicture: { width: 36, height: 36, borderRadius: 6 },
   replyBarWho: { fontWeight: "600" },
   replyText: { textDecorationLine: "underline" },
   jumpToLatest: {

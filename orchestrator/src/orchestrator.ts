@@ -706,12 +706,19 @@ export class Orchestrator {
         `block ${ownerName()} can tick and submit — see "Checklists" in your instructions. Keep it to what is genuinely useful.\n\n${ownerName()}: `
       );
     }
+    let context = "";
     const quoted = task.payload.quoted as { author?: string; speaker?: string | null; text?: string } | undefined;
     if (quoted?.text) {
       const who = quoted.author === "jp" ? "their own earlier message" : quoted.speaker === task.intern ? "your earlier message" : `${this.displayName(quoted.speaker ?? "coordinator")}'s message`;
-      return `(${ownerName()} is replying to ${who}: "${quoted.text.replace(/\s+/g, " ").slice(0, 400)}")\n`;
+      context += `(${ownerName()} is replying to ${who}: "${quoted.text.replace(/\s+/g, " ").slice(0, 400)}")\n`;
     }
-    return "";
+    const picture = task.payload.quoted_picture as { name?: string; kind?: string; caption?: string | null; link?: string | null; path?: string } | undefined;
+    if (picture?.path) {
+      const what = picture.kind === "video" ? "video" : "picture";
+      const about = [picture.caption ? `"${picture.caption.replace(/\s+/g, " ").slice(0, 160)}"` : picture.name, picture.link].filter(Boolean).join(", ");
+      context += `(${ownerName()} means this ${what}: ${about}. Its file is ${picture.path}; open it with Read to see it.)\n`;
+    }
+    return context;
   }
 
   // ---------------------------------------------------------- heartbeat

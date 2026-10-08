@@ -8,12 +8,13 @@
  *   ```rule          {"id","text","kind"}             standing-order chip
  *   ```quick-replies {"options":[…]}                  reply chips
  *   ```checklist     {"id","title","items":[…],"submit"}  tick-and-submit list
+ *   ```pick          {"question","options":[{"attachment","label"}],"multiple"?,"submit"?}  pictures to choose from
  */
 
-export const FENCE_LANGS = ["page", "rule", "quick-replies", "checklist"] as const;
+export const FENCE_LANGS = ["page", "rule", "quick-replies", "checklist", "pick"] as const;
 export type FenceLang = (typeof FENCE_LANGS)[number];
 
-const FENCE_RE = /```(page|rule|quick-replies|checklist)[ \t]*\n([\s\S]*?)```/g;
+const FENCE_RE = /```(page|rule|quick-replies|checklist|pick)[ \t]*\n([\s\S]*?)```/g;
 
 export function fence(lang: FenceLang, body: Record<string, unknown>): string {
   return "```" + lang + "\n" + JSON.stringify(body) + "\n```";
@@ -63,6 +64,14 @@ function fallbackFor(lang: FenceLang, body: Record<string, unknown> | null, mode
       const lines = items.map((item, i) => `${i + 1}. ${item?.checked === false ? "☐" : "☑"} ${str(item?.text)}`);
       const ids = items.map((item, i) => str(item?.id, String(i + 1))).join(",");
       return [`**${title}**`, ...lines, `_Reply "do ${ids}" (or the numbers you want)._`].join("\n");
+    }
+    case "pick": {
+      // the pictures themselves travel as the message's attachments, in order
+      const question = str(body.question, "Pick one");
+      if (mode === "push") return question;
+      const options = Array.isArray(body.options) ? (body.options as Record<string, unknown>[]) : [];
+      const lines = options.map((o, i) => `${i + 1}. ${str(o?.label, `Picture ${i + 1}`)}`);
+      return [`**${question}**`, ...lines, `_Reply with the number${body.multiple === true ? "s" : ""} you want._`].join("\n");
     }
   }
 }

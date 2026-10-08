@@ -259,3 +259,12 @@ export function reactionsPrompt(db: Db, slug: string, now: Date = new Date()): s
   });
   return `\n## How ${owner} reacted to your recent messages\n${lines.join("\n")}\nLet this shape how you write from now on, without mentioning it.`;
 }
+
+/** Pictures the owner hearted in this thread in the last two weeks: taste for the intern to follow. */
+export function picturesPrompt(db: Db, slug: string, now: Date = new Date()): string {
+  const liked = db.likedAttachments(slug, new Date(now.getTime() - 14 * 86_400_000).toISOString());
+  if (!liked.length) return "";
+  const owner = ownerName();
+  const lines = liked.map((a) => `- ${a.caption ? `"${a.caption.replace(/\s+/g, " ").slice(0, 100)}"` : a.name}${a.link ? ` (${a.link})` : ""}`);
+  return `\n## Pictures ${owner} hearted\n${lines.join("\n")}\nThese are what ${owner} liked among the pictures sent in this thread. Look for more like them, without mentioning this list.`;
+}

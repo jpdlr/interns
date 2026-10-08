@@ -26,7 +26,9 @@ import type { Db } from "./db.js";
 import type { Page } from "./types.js";
 
 export const MAX_MEDIA_BYTES = 15 * 1024 * 1024;
-const PREVIEW_TIMEOUT_MS = 12_000;
+export const PREVIEW_TIMEOUT_MS = 12_000;
+/** Instagram serves its og: tags to Facebook's crawler, not to a plain fetch. */
+export const PREVIEW_USER_AGENT = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)";
 const IMAGE_TYPES: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
 
 export const mediaDir = (home: string, pageId: string) => path.join(home, "page-media", pageId.replace(/[^A-Za-z0-9_-]/g, "_"));
@@ -161,7 +163,7 @@ export function parsePreview(html: string, url: string): { image: string | null;
   return { image, title: ogTitle ? ogTitle.slice(0, 90) : null, source: meta(html, "og:site_name") ?? host };
 }
 
-const defaultFetch: PreviewFetch = (url, init) => fetch(url, { ...init, redirect: "follow" });
+export const defaultFetch: PreviewFetch = (url, init) => fetch(url, { ...init, redirect: "follow" });
 
 /**
  * Fill in previews for linked items without an image. Each item is tried
@@ -183,7 +185,7 @@ export async function fillPreviews(db: Db, home: string, pageId: string, fetchFn
         const ctl = new AbortController();
         const timer = setTimeout(() => ctl.abort(), PREVIEW_TIMEOUT_MS);
         try {
-          return await fetchFn(u, { headers: { "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)", Accept: "text/html,image/*" }, signal: ctl.signal });
+          return await fetchFn(u, { headers: { "User-Agent": PREVIEW_USER_AGENT, Accept: "text/html,image/*" }, signal: ctl.signal });
         } finally {
           clearTimeout(timer);
         }

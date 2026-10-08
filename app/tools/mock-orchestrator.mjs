@@ -11,6 +11,9 @@ import { createReadStream, existsSync, readdirSync, readFileSync, statSync } fro
 import { createRequire } from "node:module";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { crc32, deflateSync } from "node:zlib";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { installFeatures } from "./mock-features.mjs";
 import { isNavigation, notFoundPage, resolvePage } from "./page-route.mjs";
 
@@ -283,7 +286,7 @@ const TYPES = {
 };
 
 /** Routes the API owns. Note /cards is both an API route and an app route. */
-const API_PATHS = /^\/(connectors|owner|templates|notify|interns|tasks|cards|activity|hire|events|meta|push|github|attachments|rooms|reports|suggest|messages|pages|rules|agenda|ideas)(\/|$)/;
+const API_PATHS = /^\/(connectors|owner|templates|notify|interns|tasks|cards|activity|hire|events|meta|push|github|attachments|rooms|reports|suggest|messages|pages|rules|agenda|ideas|link-preview|link-previews)(\/|$|\?)/;
 const isApiPath = (path) => API_PATHS.test(path);
 
 /** An asset as-is, else the route's own page (as the orchestrator does), else Expo's not-found page. */
@@ -314,9 +317,9 @@ const interns = [
 const attachments = new Map();
 const attachmentMeta = (intern, author, name, mime, bytes, extra = {}) => {
   const id = `att-${Math.random().toString(36).slice(2, 10)}`;
-  const kind = mime === "image/svg+xml" ? "svg" : mime.startsWith("image/") ? "image" : "file";
+  const kind = mime === "image/svg+xml" ? "svg" : mime.startsWith("image/") ? "image" : mime.startsWith("video/") ? "video" : "file";
   const meta = { id, intern, message_id: null, author, name, mime, size: bytes.length, kind, sha256: "mock", ext: name.split(".").pop(),
-    caption: null, width: null, height: null, created_at: new Date().toISOString(), url: `/attachments/${id}?sig=mock`, ...extra };
+    caption: null, link: null, width: null, height: null, duration: null, liked: false, created_at: new Date().toISOString(), url: `/attachments/${id}?sig=mock`, ...extra };
   attachments.set(id, { meta, bytes });
   return meta;
 };
@@ -324,6 +327,74 @@ const demoSvg = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 
 const demoCsv = Buffer.from("week,tokens,cost_usd\n1,41230,0.42\n2,38800,0.39\n3,52100,0.55\n4,47700,0.48\n");
 const svgAtt = attachmentMeta("milo", "intern", "floor-plan.svg", "image/svg+xml", demoSvg, { message_id: "m3", width: 320, height: 180, caption: "Rough floor plan for the new office" });
 const csvAtt = attachmentMeta("milo", "intern", "token-spend.csv", "text/csv", demoCsv, { message_id: "m3" });
+
+/** A diagonal two-colour gradient as a real PNG, standing in for a photo. */
+function gradientPng(width, height, [r1, g1, b1], [r2, g2, b2]) {
+  const raw = Buffer.alloc((width * 3 + 1) * height);
+  for (let y = 0; y < height; y++) {
+    const row = y * (width * 3 + 1);
+    for (let x = 0; x < width; x++) {
+      const t = (x / width + y / height) / 2;
+      raw[row + 1 + x * 3] = r1 + (r2 - r1) * t;
+      raw[row + 2 + x * 3] = g1 + (g2 - g1) * t;
+      raw[row + 3 + x * 3] = b1 + (b2 - b1) * t;
+    }
+  }
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(Buffer.concat([Buffer.from(type), data])));
+    return Buffer.concat([len, Buffer.from(type), data, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}
+/**
+ * A reel for the demo: MOCK_VIDEO=<file.mp4>, else ffmpeg's test pattern (no
+ * ffmpeg: no video). Its poster is the opening frame, as the orchestrator makes it.
+ */
+function demoVideo() {
+  try {
+    const dir = join(tmpdir(), `interns-mock-video-${process.pid}`);
+    execFileSync("mkdir", ["-p", dir]);
+    const file = process.env.MOCK_VIDEO || join(dir, "reel.mp4");
+    if (!process.env.MOCK_VIDEO) execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=360x640:rate=24", "-t", "4", "-pix_fmt", "yuv420p", "-movflags", "+faststart", file]);
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-ss", "0.1", "-i", file, "-frames:v", "1", join(dir, "poster.jpg")]);
+    const probe = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height:format=duration", "-of", "json", file]).toString());
+    const video = { bytes: readFileSync(file), poster: readFileSync(join(dir, "poster.jpg")), width: probe.streams[0].width, height: probe.streams[0].height, duration: Number(probe.format.duration) };
+    execFileSync("rm", ["-rf", dir]); // held in memory from here
+    return video;
+  } catch {
+    return null;
+  }
+}
+const reel = demoVideo();
+const reelAtt = reel
+  ? attachmentMeta("milo", "intern", process.env.MOCK_VIDEO?.endsWith(".webm") ? "reel.webm" : "reel.mp4", process.env.MOCK_VIDEO?.endsWith(".webm") ? "video/webm" : "video/mp4", reel.bytes, { message_id: "m13", width: reel.width, height: reel.height, duration: Math.round(reel.duration * 10) / 10, caption: "Climber in the mist, one take", link: "https://www.instagram.com/reel/demo-climb/" })
+  : null;
+if (reelAtt) attachments.get(reelAtt.id).poster = reel.poster;
+// Three options to pick between (a pick block names them).
+const pickAtts = [
+  ["lead-window.png", [30, 34, 44], [214, 196, 170], "Wing over haze"],
+  ["lead-rock.png", [58, 52, 40], [176, 141, 87], "Field watch on rock"],
+  ["lead-coast.png", [24, 24, 24], [210, 210, 210], "Coast in black and white"],
+].map(([name, a, b, caption]) => attachmentMeta("milo", "intern", name, "image/png", gradientPng(600, 750, a, b), { message_id: "m14", width: 600, height: 750, caption }));
+const linkCardPng = gradientPng(600, 600, [40, 52, 64], [170, 182, 190]);
+// Posts an intern found, sent as separate pictures with their source links (the gallery).
+const postAtts = [
+  ["lone-figure.png", 480, 600, [40, 52, 64], [170, 182, 190], "One figure small on the ridge, muted grade", "https://www.instagram.com/p/demo-ridge/"],
+  ["plane-window.png", 600, 600, [30, 34, 44], [214, 196, 170], "Wing over haze, shot from the window seat", "https://www.instagram.com/p/demo-window/"],
+  ["wrist-field.png", 600, 600, [58, 52, 40], [176, 141, 87], "Field watch against grey rock", "https://www.instagram.com/p/demo-wrist/"],
+  ["coast-bw.png", 600, 600, [24, 24, 24], [210, 210, 210], "Black and white coast, tiny figure", "https://www.instagram.com/p/demo-coast/"],
+  ["mist-climb.png", 360, 640, [90, 100, 110], [225, 228, 230], "Climber in the mist, phone shot", "https://www.instagram.com/reel/demo-climb/"],
+  ["dusk-road.png", 600, 600, [44, 30, 60], [224, 122, 95], "Windscreen into dusk", "https://www.instagram.com/p/demo-dusk/"],
+  ["yorkie.png", 600, 600, [70, 60, 50], [200, 180, 150], "Small dog, clean background", "https://www.instagram.com/p/demo-dog/"],
+].map(([name, w, h, a, b, caption, link]) => attachmentMeta("milo", "intern", name, "image/png", gradientPng(w, h, a, b), { message_id: "m11", width: w, height: h, caption, link }));
 
 let suggestStatus = { running: false, started_at: null, finished_at: null, last: null };
 
@@ -352,6 +423,16 @@ const messages = {
     { id: "m8", intern: "milo", author: "jp", text: "Tighten my bio?", ts: iso(800e3), surface: "app" },
     { id: "m9", intern: "milo", author: "intern", ts: iso(700e3), surface: "system",
       text: "Two versions. Both keep your best line.\n\n**⭐ My pick — 112 chars**\n```\nDesign • Coffee • Bikes\nUsually sketching, riding, or fixing something.\nCape Town\n```\nScannable header, your line, home.\n\n**Shorter — 74 chars**\n```\nDesigner. Usually sketching, riding, or fixing something.\n```\n\nSay which and I'll update the profile." },
+    { id: "m10", intern: "milo", author: "jp", text: "Find me a few posts in my style?", ts: iso(500e3), surface: "app" },
+    { id: "m11", intern: "milo", author: "intern", ts: iso(480e3), surface: "system", attachments: postAtts,
+      text: "Seven posts closest to your look: small figures in big views, muted colour, the window seat. Tap one to swipe through; each opens on Instagram." },
+    { id: "m12", intern: "milo", author: "intern", ts: iso(470e3), surface: "system", attachments: [],
+      text: "And the references board, updated:\n\n```page\n{\"id\":\"pg_refs\",\"title\":\"References — reels you sent\",\"kind\":\"moodboard\"}\n```" },
+    ...(reelAtt ? [{ id: "m13", intern: "milo", author: "intern", ts: iso(460e3), surface: "system", attachments: [reelAtt], text: "And the reel I mentioned. It plays here; tap it for sound." }] : []),
+    { id: "m14", intern: "milo", author: "intern", ts: iso(450e3), surface: "system", attachments: pickAtts,
+      text: "For Sunday's carousel, which one leads?\n\n```pick\n" + JSON.stringify({ question: "Which one leads the carousel?", options: pickAtts.map((a) => ({ attachment: a.id, label: a.caption })) }) + "\n```" },
+    { id: "m15", intern: "milo", author: "intern", ts: iso(440e3), surface: "system", attachments: [],
+      text: "This one is worth a look for the framing: https://www.instagram.com/p/demo-ridge/" },
   ],
   nia: [
     { id: "m3", intern: "nia", author: "intern", text: "Briefing on the city tender is ready. **Short version:** the deadline moved to the 9th.", ts: iso(7200e3), surface: "discord" },
@@ -515,6 +596,8 @@ const emit = (event, data) => {
 
 // Pages, standing orders, Today, ideas, the front desk (docs/features) — see mock-features.mjs.
 const features = installFeatures({ messages, cards, interns, emit, iso });
+// threads read oldest first, as the orchestrator returns them
+for (const thread of Object.values(messages)) thread.sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://127.0.0.1");
@@ -544,11 +627,26 @@ const server = http.createServer((req, res) => {
     const hit = attachments.get(attMatch[1]);
     if (!hit) { res.writeHead(404, cors); return res.end(); }
     const download = url.searchParams.get("download") === "1";
-    res.writeHead(200, { ...cors, "content-type": hit.meta.mime, "content-length": hit.bytes.length,
+    if (url.searchParams.get("poster") === "1" && hit.poster) {
+      res.writeHead(200, { ...cors, "content-type": "image/jpeg", "content-length": hit.poster.length });
+      return res.end(hit.poster);
+    }
+    const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? "");
+    if (range && range[1]) {
+      const start = Number(range[1]);
+      const end = range[2] ? Math.min(Number(range[2]), hit.bytes.length - 1) : hit.bytes.length - 1;
+      res.writeHead(206, { ...cors, "content-type": hit.meta.mime, "accept-ranges": "bytes", "content-range": `bytes ${start}-${end}/${hit.bytes.length}`, "content-length": end - start + 1 });
+      return res.end(hit.bytes.subarray(start, end + 1));
+    }
+    res.writeHead(200, { ...cors, "content-type": hit.meta.mime, "content-length": hit.bytes.length, "accept-ranges": "bytes",
       "content-disposition": `${download ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(hit.meta.name)}` });
     return res.end(hit.bytes);
   }
   if (req.method === "GET" && url.searchParams.get("sig") && features.serveMedia(path, res, cors)) return;
+  if (req.method === "GET" && /^\/link-previews\/demo$/.test(path) && url.searchParams.get("sig")) {
+    res.writeHead(200, { ...cors, "content-type": "image/png", "content-length": linkCardPng.length });
+    return res.end(linkCardPng);
+  }
   if (req.headers.authorization !== `Bearer ${TOKEN}`) {
     res.writeHead(401, { ...cors, "content-type": "application/json" });
     return res.end(JSON.stringify({ error: "unauthorized" }));
@@ -559,6 +657,30 @@ const server = http.createServer((req, res) => {
   };
 
   if (features.handle(req, res, path, url, json)) return;
+
+  if (path === "/link-preview" && req.method === "GET") {
+    const link = url.searchParams.get("url") ?? "";
+    if (!/instagram\.com\/(p|reel)\//.test(link)) return json(404, { error: "no preview for this link" });
+    return json(200, { url: link, title: "One figure small on the ridge", source: "Northwind Outfitters", image_url: "/link-previews/demo?sig=mock" });
+  }
+  let likeMatch = /^\/attachments\/([^/]+)\/(like|save-to-board)$/.exec(path);
+  if (likeMatch && req.method === "POST") {
+    const hit = attachments.get(likeMatch[1]);
+    if (!hit) return json(404, { error: "no such attachment" });
+    let body = "";
+    req.on("data", (c) => (body += c));
+    return req.on("end", () => {
+      const input = JSON.parse(body || "{}");
+      if (likeMatch[2] === "like") {
+        hit.meta.liked = Boolean(input.liked);
+        const msg = Object.values(messages).flat().find((m) => m.id === hit.meta.message_id);
+        if (msg) emit("message", msg);
+        return json(200, hit.meta);
+      }
+      const page = { id: input.page_id ?? "pg_saved", intern: hit.meta.intern, thread_key: hit.meta.intern, kind: "moodboard", title: input.page_id ? "References — reels you sent" : "Saved pictures", summary: "", version: 1, pinned: false, created_at: iso(0), updated_at: iso(0), archived_at: null };
+      return json(200, { page, item_id: `att_${hit.meta.id.slice(4, 12)}`, already: false });
+    });
+  }
 
   attMatch = /^\/interns\/([^/]+)\/attachments$/.exec(path);
   if (attMatch) {
@@ -573,7 +695,7 @@ const server = http.createServer((req, res) => {
       const name = url.searchParams.get("name") || "upload";
       const mime = (req.headers["content-type"] || "application/octet-stream").split(";")[0];
       // slow it down a little so the progress strip is visible
-      setTimeout(() => json(201, attachmentMeta(slug, url.searchParams.get("author") || "jp", name, mime, bytes, { caption: url.searchParams.get("caption") })), 600);
+      setTimeout(() => json(201, attachmentMeta(slug, url.searchParams.get("author") || "jp", name, mime, bytes, { caption: url.searchParams.get("caption"), link: url.searchParams.get("link") })), 600);
     });
   }
 
@@ -772,10 +894,11 @@ const server = http.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
     return req.on("end", () => {
-      const { text = "", attachment_ids = [], reply_to = null } = JSON.parse(body || "{}");
+      const { text = "", attachment_ids = [], reply_to = null, quote_attachment_id = null } = JSON.parse(body || "{}");
       const attached = attachment_ids.map((id) => attachments.get(id)?.meta).filter(Boolean);
       if (!text.trim() && attached.length === 0) return json(400, { error: "text or attachment_ids required" });
-      const message = { id: `m${Date.now()}`, intern: slug, author: "jp", speaker: null, reply_to, text, ts: new Date().toISOString(), surface: "app", attachments: attached };
+      const quoted = quote_attachment_id ? attachments.get(quote_attachment_id)?.meta ?? null : null;
+      const message = { id: `m${Date.now()}`, intern: slug, author: "jp", speaker: null, reply_to, text, ts: new Date().toISOString(), surface: "app", attachments: attached, quote_attachment: quoted?.id ?? null, quoted_attachment: quoted };
       const room = rooms.find((r) => r.id === slug);
       const mentioned = [...text.matchAll(/(^|[^\w@])@(\w+)/g)].map((m) => m[2].toLowerCase());
       const everyone = mentioned.some((m) => ["all", "everyone"].includes(m) || (room && room.name.toLowerCase().split(" ")[0] === m));

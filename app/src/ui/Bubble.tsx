@@ -5,6 +5,8 @@ import type { Attachment, InternsApi, Message } from "../api";
 import { radius, space, useAppTheme } from "../theme";
 import { clockTime } from "../time";
 import { AttachmentList } from "./Attachments";
+import { pickAttachmentIds } from "./Fences";
+import { FadeImage } from "./Media";
 import { DiscordIcon, ReplyIcon } from "./Icons";
 import { InternFace } from "./InternFace";
 import { hasMarkdown, Markdown } from "./Markdown";
@@ -38,7 +40,8 @@ export interface BubbleProps {
   highlighted?: boolean;
   /** needed to resolve attachment URLs; bubbles without attachments can omit it */
   api?: InternsApi;
-  onOpenAttachment?: (attachment: Attachment) => void;
+  /** `gallery`: the message's pictures, for swiping in the viewer */
+  onOpenAttachment?: (attachment: Attachment, gallery: Attachment[]) => void;
   /** group chats / handoffs: who spoke, shown above the first bubble of a run */
   speakerName?: string;
   /** the message this one answers, resolved by the thread: who said it and a snippet */
@@ -83,7 +86,10 @@ function BubbleImpl({
   const { colors } = useAppTheme();
   const { width } = useWindowDimensions();
   const faceSize = width < MOBILE_THREAD_BREAKPOINT ? MOBILE_FACE_SIZE : THREAD_FACE_SIZE;
-  const attachments = message.attachments ?? [];
+  // pictures offered in a pick block show there, not again in the gallery
+  const picked = pickAttachmentIds(message.text);
+  const attachments = (message.attachments ?? []).filter((a) => !picked.has(a.id));
+  const quotedPicture = message.quoted_attachment ?? null;
   const hasText = message.text.trim().length > 0;
   const { body, signature } = mine ? { body: message.text, signature: null } : splitSignature(message.text);
   // Charts, drawings, diagrams and tables size themselves to the bubble, so
@@ -176,6 +182,32 @@ function BubbleImpl({
     </Pressable>
   ) : null;
 
+  const pictureQuote = quotedPicture && api ? (
+    <Pressable
+      onPress={() => onOpenAttachment?.(quotedPicture, [quotedPicture])}
+      accessibilityRole="imagebutton"
+      accessibilityLabel={`About the picture: ${quotedPicture.caption ?? quotedPicture.name}`}
+      style={({ pressed }) => [
+        styles.quote,
+        styles.pictureQuote,
+        mine ? styles.quoteMine : null,
+        { borderLeftColor: colors.textFaint, backgroundColor: colors.accentSoft, opacity: pressed ? 0.7 : 1 },
+      ]}
+    >
+      <FadeImage uri={api.previewUrl(quotedPicture, 40)} style={styles.pictureQuoteImage} accessibilityLabel={quotedPicture.name} />
+      <View style={styles.pictureQuoteText}>
+        <Text variant="caption" color={colors.text} numberOfLines={1} style={styles.quoteWho}>
+          {quotedPicture.kind === "video" ? "About this video" : "About this picture"}
+        </Text>
+        {quotedPicture.caption ? (
+          <Text variant="caption" numberOfLines={1}>
+            {quotedPicture.caption}
+          </Text>
+        ) : null}
+      </View>
+    </Pressable>
+  ) : null;
+
   return (
     <View ref={rowRef} style={styles.swipeFrame}>
       {onReply ? (
@@ -216,6 +248,7 @@ function BubbleImpl({
             </Text>
           ) : null}
           {quote && !quoteInside ? quote : null}
+          {pictureQuote}
           {hasText ? (
             <Pressable
               onLongPress={onLongPress ? () => onLongPress(message) : undefined}
@@ -261,7 +294,7 @@ function BubbleImpl({
           ) : null}
           {attachments.length && api ? (
             <View style={pending ? styles.pending : null}>
-              <AttachmentList attachments={attachments} api={api} mine={mine} onOpen={(att) => onOpenAttachment?.(att)} />
+              <AttachmentList attachments={attachments} api={api} mine={mine} onOpen={(att, gallery) => onOpenAttachment?.(att, gallery)} />
             </View>
           ) : null}
         </View>
@@ -363,6 +396,9 @@ const styles = StyleSheet.create({
   quoteMine: { alignSelf: "flex-end" },
   quoteWho: { fontWeight: "600" },
   quoteSnippetMine: { opacity: 0.8 },
+  pictureQuote: { flexDirection: "row", alignItems: "center", gap: space.sm, paddingLeft: 4 },
+  pictureQuoteImage: { width: 36, height: 36, borderRadius: radius.sm },
+  pictureQuoteText: { flexShrink: 1, minWidth: 0 },
   metaRow: { flexDirection: "row" },
   metaRowMine: { justifyContent: "flex-end" },
   meta: { flexDirection: "row", alignItems: "center", marginTop: space.xs, paddingHorizontal: space.xs },

@@ -458,6 +458,41 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS idx_pages_intern ON pages(intern, updated_at);
   CREATE INDEX IF NOT EXISTS idx_pages_thread ON pages(thread_key, updated_at);
   `,
+  `
+  ALTER TABLE attachments ADD COLUMN link TEXT;
+  `,
+  // video joins the kinds (a CHECK can only change by rebuilding the table);
+  // hearts from the viewer; a message can quote one picture
+  `
+  CREATE TABLE attachments_next (
+    id TEXT PRIMARY KEY,
+    intern TEXT NOT NULL,
+    message_id TEXT,
+    author TEXT NOT NULL CHECK (author IN ('jp','intern','coordinator')),
+    name TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('image','svg','video','file')),
+    sha256 TEXT NOT NULL,
+    ext TEXT NOT NULL,
+    caption TEXT,
+    link TEXT,
+    width INTEGER,
+    height INTEGER,
+    duration REAL,
+    liked INTEGER NOT NULL DEFAULT 0,
+    liked_at TEXT,
+    created_at TEXT NOT NULL
+  );
+  INSERT INTO attachments_next (id, intern, message_id, author, name, mime, size, kind, sha256, ext, caption, link, width, height, created_at)
+    SELECT id, intern, message_id, author, name, mime, size, kind, sha256, ext, caption, link, width, height, created_at FROM attachments;
+  DROP TABLE attachments;
+  ALTER TABLE attachments_next RENAME TO attachments;
+  CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
+  CREATE INDEX IF NOT EXISTS idx_attachments_intern_created ON attachments(intern, created_at);
+  CREATE INDEX IF NOT EXISTS idx_attachments_liked ON attachments(intern, liked_at);
+  ALTER TABLE messages ADD COLUMN quote_attachment TEXT;
+  `,
 ];
 
 interface PageRow {
@@ -619,6 +654,8 @@ function rowToApprovalJob(row: ApprovalJobRow): ApprovalJob {
   });
 }
 
+type MessageRow = Omit<Message, "attachments" | "quoted_attachment">;
+
 interface AttachmentRow {
   id: string;
   intern: string;
@@ -631,8 +668,12 @@ interface AttachmentRow {
   sha256: string;
   ext: string;
   caption: string | null;
+  link: string | null;
   width: number | null;
   height: number | null;
+  duration: number | null;
+  liked: number;
+  liked_at: string | null;
   created_at: string;
 }
 
@@ -710,7 +751,15 @@ export class Db {
    * surfaces can render them without a second fetch.
    */
   addMessage(
-    input: Omit<Message, "id" | "ts" | "attachments" | "speaker" | "reply_to" | "pinned" | "reaction" | "cause"> & { id?: string; ts?: string; speaker?: string | null; reply_to?: string | null; cause?: Message["cause"]; attachmentIds?: string[] },
+    input: Omit<Message, "id" | "ts" | "attachments" | "speaker" | "reply_to" | "pinned" | "reaction" | "cause" | "quote_attachment" | "quoted_attachment"> & {
+      id?: string;
+      ts?: string;
+      speaker?: string | null;
+      reply_to?: string | null;
+      cause?: Message["cause"];
+      attachmentIds?: string[];
+      quote_attachment?: string | null;
+    },
   ): Message {
     const { attachmentIds = [], ...rest } = input;
     // A caller may pick the id up front so things that belong to the message
@@ -718,8 +767,8 @@ export class Db {
     const id = rest.id ?? randomUUID();
     const ts = rest.ts ?? nowIso();
     this.sqlite
-      .prepare("INSERT INTO messages (id, intern, author, speaker, reply_to, text, ts, surface, cause) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(id, rest.intern, rest.author, rest.speaker ?? null, rest.reply_to ?? null, rest.text, ts, rest.surface, rest.cause ?? null);
+      .prepare("INSERT INTO messages (id, intern, author, speaker, reply_to, text, ts, surface, cause, quote_attachment) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(id, rest.intern, rest.author, rest.speaker ?? null, rest.reply_to ?? null, rest.text, ts, rest.surface, rest.cause ?? null, rest.quote_attachment ?? null);
     if (attachmentIds.length) this.linkAttachments(rest.intern, attachmentIds, id);
     const msg = this.getMessage(id)!;
     this.bus.emit("message", msg);
@@ -727,19 +776,29 @@ export class Db {
   }
 
   getMessage(id: string): Message | undefined {
-    const row = this.sqlite.prepare("SELECT * FROM messages WHERE id = ?").get(id) as Omit<Message, "attachments"> | undefined;
-    if (!row) return undefined;
-    return MessageSchema.parse({ ...row, attachments: this.attachmentsForMessages([id]).get(id) ?? [] });
+    const row = this.sqlite.prepare("SELECT * FROM messages WHERE id = ?").get(id) as MessageRow | undefined;
+    return row ? this.hydrateMessages([row])[0] : undefined;
   }
 
   listMessages(intern: string, limit = 100): Message[] {
     const rows = (
       this.sqlite
         .prepare("SELECT * FROM messages WHERE intern = ? ORDER BY ts DESC LIMIT ?")
-        .all(intern, limit) as Omit<Message, "attachments">[]
+        .all(intern, limit) as MessageRow[]
     ).reverse();
+    return this.hydrateMessages(rows);
+  }
+
+  /** Rows → messages with their attachments and the picture they quote. */
+  private hydrateMessages(rows: MessageRow[]): Message[] {
     const byMessage = this.attachmentsForMessages(rows.map((r) => r.id));
-    return rows.map((r) => MessageSchema.parse({ ...r, attachments: byMessage.get(r.id) ?? [] }));
+    return rows.map((r) =>
+      MessageSchema.parse({
+        ...r,
+        attachments: byMessage.get(r.id) ?? [],
+        quoted_attachment: r.quote_attachment ? (this.getAttachment(r.quote_attachment) ?? null) : null,
+      }),
+    );
   }
 
   // --------------------------------------------------------------- rooms
@@ -815,6 +874,8 @@ export class Db {
     sha256: string;
     ext: string;
     caption?: string | null;
+    link?: string | null;
+    duration?: number | null;
     width?: number | null;
     height?: number | null;
     /** caller-chosen id so the file can be written under it before the row exists */
@@ -823,8 +884,8 @@ export class Db {
     const id = input.id ?? randomUUID();
     this.sqlite
       .prepare(
-        `INSERT INTO attachments (id, intern, message_id, author, name, mime, size, kind, sha256, ext, caption, width, height, created_at)
-         VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO attachments (id, intern, message_id, author, name, mime, size, kind, sha256, ext, caption, link, width, height, duration, created_at)
+         VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -837,8 +898,10 @@ export class Db {
         input.sha256,
         input.ext,
         input.caption ?? null,
+        input.link ?? null,
         input.width ?? null,
         input.height ?? null,
+        input.duration ?? null,
         nowIso(),
       );
     return this.getAttachment(id)!;
@@ -847,6 +910,22 @@ export class Db {
   getAttachment(id: string): Attachment | undefined {
     const row = this.sqlite.prepare("SELECT * FROM attachments WHERE id = ?").get(id) as AttachmentRow | undefined;
     return row ? this.rowToAttachment(row) : undefined;
+  }
+
+  /** Heart or un-heart a picture; its message is re-emitted so open threads update. */
+  setAttachmentLiked(id: string, liked: boolean): Attachment | undefined {
+    this.sqlite.prepare("UPDATE attachments SET liked = ?, liked_at = ? WHERE id = ?").run(liked ? 1 : 0, liked ? nowIso() : null, id);
+    const att = this.getAttachment(id);
+    if (att?.message_id) this.emitMessage(att.message_id);
+    return att;
+  }
+
+  /** Pictures the owner hearted in a thread since `sinceIso`, newest first. */
+  likedAttachments(intern: string, sinceIso: string, limit = 12): Attachment[] {
+    const rows = this.sqlite
+      .prepare("SELECT * FROM attachments WHERE intern = ? AND liked = 1 AND liked_at >= ? ORDER BY liked_at DESC LIMIT ?")
+      .all(intern, sinceIso, limit) as AttachmentRow[];
+    return rows.map((r) => this.rowToAttachment(r));
   }
 
   /** Newest first; the app's per-intern "Files" view. */
@@ -918,9 +997,8 @@ export class Db {
   listPinned(thread: string): Message[] {
     const rows = this.sqlite
       .prepare("SELECT * FROM messages WHERE intern = ? AND pinned = 1 ORDER BY ts ASC")
-      .all(thread) as Omit<Message, "attachments">[];
-    const byMessage = this.attachmentsForMessages(rows.map((r) => r.id));
-    return rows.map((r) => MessageSchema.parse({ ...r, attachments: byMessage.get(r.id) ?? [] }));
+      .all(thread) as MessageRow[];
+    return this.hydrateMessages(rows);
   }
 
   /** Re-emit a message after its attachment set changed (renderers replace by id). */

@@ -6,6 +6,35 @@ and versions follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Pictures in the chat as a gallery.** When an intern sends several pictures in one reply
+  they show as a grid (an odd count leads with one wide picture; past six, the last counts the
+  rest). Tap one to open it full screen, then swipe, use the arrows or the arrow keys to step
+  through, with each picture's caption. A picture can carry the page it came from
+  (`intern-attach --link`), shown under a single picture and as "Open on instagram.com" in the
+  viewer. Interns are told to send a few pictures one by one with their post links instead of
+  stitching them into one image, and `ig-research --sheet` reports where each post's own image
+  is saved. The Files screen swipes through the thread's pictures too, and a moodboard's card in
+  the chat shows its first pictures.
+- **Reels play in the chat.** Interns can send video (.mp4, .mov, .webm up to 25 MB): one
+  plays muted and looping while it's on screen, a grid shows its opening frame with its length,
+  and the viewer plays it with sound and controls. The server reads a video's size and length
+  with ffprobe, makes its poster with ffmpeg, and serves byte ranges (Safari needs them).
+  `ig-research --save` keeps each post's real media: the full-size image, every carousel slide,
+  and a reel as .mp4 with its cover (some reels come without a video).
+- **React to a picture in the viewer.** Love it (hearted pictures from the last two weeks reach
+  the intern as taste to follow), keep it on a moodboard (any board in the thread, or a "Saved
+  pictures" board made on first use; a video goes on as its opening frame), or reply about it:
+  the reply shows the picture, and the intern gets its file to look at.
+- **Pick-one cards.** An intern can offer pictures to choose between with a ```` ```pick ````
+  block naming its attachments. They show as numbered tiles; one tap answers with that picture
+  quoted, or tick several and submit when the block allows it. Discord gets a numbered list.
+- **Instagram links preview themselves.** A post or reel linked in a message shows as a card
+  with its image, caption and account; the image is kept on the server, as Instagram's links
+  expire (`GET /link-preview`).
+- **Sharper, faster pictures.** Grids and thumbnails load a JPEG sized for the screen
+  (`?w=` on an attachment, made with ffmpeg and cached), the viewer loads the full picture, and
+  pictures fade in. The viewer zooms (pinch, drag, double-tap), and Save opens the share sheet
+  with the file where the browser allows it, so on an iPhone "Save Image" puts it in Photos.
 - **Photos sync from Google Drive.** Connect Google Drive on the Google Photos screen and
   photos keep arriving on their own: a Google Takeout export of Google Photos delivered to
   Drive (once, or every two months) is found, downloaded and imported, and so is anything saved
@@ -72,14 +101,18 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - **Helpers for small chores.** An intern can hand a very small, mechanical job (tagging a
   batch of photos, one lookup) to a helper on Haiku 5.5, and split a big chore across several.
   The helper has the intern's own tools and permissions and reports back; it can't start
-  helpers of its own, and no other kind of subagent is allowed. Helper tokens count a fortieth
-  against the intern's daily token cap, as Haiku 5.5 costs 1/40 of Opus 5.5.
+  helpers of its own. Helper tokens count a fortieth against the intern's daily token cap, as
+  Haiku 5.5 costs 1/40 of Opus 5.5.
 
 ### Changed
 - **Haiku 5.5 for every cheap call.** Mail triage, idea tags, responders, the advisor,
   suggestions and draft learning move from Haiku 4.5 to Haiku 5.5. Agent SDK 0.3.293.
 
 ### Fixed
+- **Interns can send a subagent out for research again.** The helper change allowed only the
+  helper, so asking an intern to send a subagent out to find accounts got "the subagent wasn't
+  available". The built-in `general-purpose` subagent is back for bigger jobs, on the intern's
+  own model with tokens counted in full; every other kind is still refused.
 - **Interns no longer get the owner's claude.ai connectors.** Every session loaded them
   (Microsoft 365 and Claude Docs here), and with `bypassPermissions` an intern, or an email
   read by triage, could have used them, including sending mail. Sessions now load no MCP servers.

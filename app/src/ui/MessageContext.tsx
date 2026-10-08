@@ -4,6 +4,7 @@
  * markdown have no provider, so those blocks render read-only there.
  */
 import React, { createContext, useContext } from "react";
+import type { Attachment, InternsApi } from "../api";
 
 export interface MessageContextValue {
   /** thread key the message lives in */
@@ -13,8 +14,13 @@ export interface MessageContextValue {
   speaker: string | null;
   /** JP has written in the thread since this message — its chips are spent */
   answered: boolean;
-  /** send JP's reply to this message */
-  reply: (text: string) => Promise<void>;
+  /** send JP's reply to this message; `quoteAttachmentId` names the picture it is about */
+  reply: (text: string, opts?: { quoteAttachmentId?: string }) => Promise<void>;
+  /** the message's files (a pick block shows its pictures from these) */
+  attachments?: Attachment[];
+  api?: InternsApi;
+  /** open a picture full screen, swiping through `gallery` */
+  openAttachment?: (attachment: Attachment, gallery: Attachment[]) => void;
   /** put text in the composer (as a reply to this message) without sending */
   compose: (text: string) => void;
 }

@@ -7,7 +7,7 @@
  */
 import { Stack, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Attachment, Intern } from "../../src/api";
 import { useRefreshSignal } from "../../src/live";
@@ -15,7 +15,8 @@ import { useSettings } from "../../src/settings";
 import { radius, space, useAppTheme } from "../../src/theme";
 import { dayLabel } from "../../src/time";
 import { AttachmentViewer, formatBytes, openExternal } from "../../src/ui/Attachments";
-import { DownloadIcon, FileIcon } from "../../src/ui/Icons";
+import { DownloadIcon, FileIcon, PlayIcon } from "../../src/ui/Icons";
+import { FadeImage } from "../../src/ui/Media";
 import { EmptyState, ErrorNote, Loading, Screen } from "../../src/ui/Screen";
 import { Text } from "../../src/ui/Text";
 
@@ -59,7 +60,7 @@ export default function FilesScreen() {
     void load();
   }, [load, refreshSignal]);
 
-  const pictures = useMemo(() => items.filter((a) => a.kind === "image" || a.kind === "svg"), [items]);
+  const pictures = useMemo(() => items.filter((a) => a.kind === "image" || a.kind === "svg" || a.kind === "video"), [items]);
   const files = useMemo(() => items.filter((a) => a.kind === "file"), [items]);
   const columns = width >= 900 ? 5 : width >= 600 ? 4 : 3;
   const tile = Math.floor((Math.min(width, 1100) - space.lg * 2 - space.sm * (columns - 1)) / columns);
@@ -142,7 +143,12 @@ export default function FilesScreen() {
                     accessibilityLabel={a.caption ?? a.name}
                     style={({ pressed }) => [styles.tile, { width: tile, height: tile, backgroundColor: colors.surfaceAlt, borderColor: colors.border, opacity: pressed ? 0.85 : 1 }]}
                   >
-                    <Image source={{ uri: api.attachmentUrl(a) }} style={{ width: tile, height: tile }} resizeMode="cover" accessibilityLabel={a.name} />
+                    <FadeImage uri={api.previewUrl(a, tile)} style={{ width: tile, height: tile }} accessibilityLabel={a.name} />
+                    {a.kind === "video" ? (
+                      <View style={styles.tilePlay} pointerEvents="none">
+                        <PlayIcon size={12} color="#fafafa" />
+                      </View>
+                    ) : null}
                     {/* Top corner, small: pictures often carry their own caption along the bottom edge. */}
                     <View style={[styles.tileTag, { backgroundColor: colors.overlay }]}>
                       <Text variant="caption" color="#fafafa" numberOfLines={1} style={styles.tileTagText}>
@@ -202,12 +208,13 @@ export default function FilesScreen() {
           ) : null}
         </ScrollView>
       )}
-      <AttachmentViewer attachment={viewing} api={api} onClose={() => setViewing(null)} />
+      <AttachmentViewer attachment={viewing} gallery={pictures.some((a) => a.id === viewing?.id) ? pictures : undefined} api={api} onClose={() => setViewing(null)} />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  tilePlay: { position: "absolute", left: 6, bottom: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: "rgba(9,9,11,0.6)", alignItems: "center", justifyContent: "center" },
   body: { padding: space.lg, gap: space.lg, maxWidth: 1100, width: "100%", alignSelf: "center" },
   summaryRow: { gap: space.sm },
   segments: { flexDirection: "row", gap: space.sm },

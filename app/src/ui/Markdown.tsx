@@ -17,7 +17,7 @@ import { useCrew } from "../crew";
 import { usePage } from "../usePage";
 import { radius, space, useAppTheme, type AppColors } from "../theme";
 import { Chart, parseChartBlock } from "./Chart";
-import { ChecklistBlock, FenceQuickReplies, PagePreview, parseChecklist, parseFenceJson, RuleChip, RuleGroup } from "./Fences";
+import { ChecklistBlock, FenceQuickReplies, PagePreview, parseChecklist, parseFenceJson, parsePick, PickBlock, RuleChip, RuleGroup } from "./Fences";
 import { CheckIcon, CopyIcon, UsersIcon } from "./Icons";
 import { InternFace } from "./InternFace";
 import { Mermaid } from "./Mermaid";
@@ -428,7 +428,7 @@ function MarkdownImpl({ body, variant = "body", tone = "default", surface }: Mar
     const lang = fenceLang.toLowerCase();
     // Message blocks (docs/features/contracts.md §1). Invalid JSON shows one
     // quiet line — never the raw JSON.
-    if (lang === "page" || lang === "rule" || lang === "quick-replies" || lang === "checklist") {
+    if (lang === "page" || lang === "rule" || lang === "quick-replies" || lang === "checklist" || lang === "pick") {
       const body = parseFenceJson(source);
       if (lang === "page" && typeof body?.id === "string") {
         blocks.push(<PagePreview key={key} id={body.id} title={typeof body.title === "string" ? body.title : undefined} kind={typeof body.kind === "string" ? body.kind : undefined} />);
@@ -438,6 +438,8 @@ function MarkdownImpl({ body, variant = "body", tone = "default", surface }: Mar
         blocks.push(<FenceQuickReplies key={key} options={(body.options as unknown[]).filter((o): o is string => typeof o === "string" && Boolean(o.trim()))} />);
       } else if (lang === "checklist" && body && parseChecklist(body)) {
         blocks.push(<ChecklistBlock key={key} {...parseChecklist(body)!} />);
+      } else if (lang === "pick" && body && parsePick(body)) {
+        blocks.push(<PickBlock key={key} {...parsePick(body)!} />);
       } else {
         blocks.push(
           <Text key={key} variant="caption" color={palette.dim}>
@@ -697,6 +699,7 @@ export function stripMarkdown(text: string): string {
     .replace(/```rule\s*\n([\s\S]*?)```/gi, (_m, body: string) => ` 📌 ${String(parseFenceJson(body)?.text ?? "standing order")} `)
     .replace(/```checklist\s*\n([\s\S]*?)```/gi, (_m, body: string) => ` ☑ ${String(parseFenceJson(body)?.title ?? "checklist")} `)
     .replace(/```quick-replies\s*\n[\s\S]*?```/gi, " ")
+    .replace(/```pick\s*\n([\s\S]*?)```/gi, (_m, body: string) => ` ${String(parseFenceJson(body)?.question ?? "Pick one")} `)
     .replace(/⟨pg_[^⟩]*⟩/g, "")
     .replace(/```(?:chart|chart\.json)[\s\S]*?```/gi, " [chart] ")
     .replace(/```svg[\s\S]*?```/gi, " [drawing] ")

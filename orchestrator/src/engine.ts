@@ -24,7 +24,7 @@ import { SMALL_MODEL, SMALL_MODEL_CAP_WEIGHT } from "./models.js";
 import { ownerName } from "./profile.js";
 import type { Registry } from "./registry.js";
 import { standingOrdersPrompt } from "./rules.js";
-import { reactionsPrompt } from "./reactions.js";
+import { picturesPrompt, reactionsPrompt } from "./reactions.js";
 import { stylePrompt } from "./style.js";
 import type { InternManifest } from "./types.js";
 
@@ -129,20 +129,31 @@ When you're done, reply with a short plain report: what you did, and anything yo
 }
 
 /**
- * PreToolUse guard on the Agent tool. The helper is the only subagent, and
- * the call is rebuilt so its model/effort/isolation overrides can't move it
- * off SMALL_MODEL. It runs in the foreground: a headless run ends with its
- * turn, so a background helper's report would be lost.
+ * The built-in subagent for bigger, read-mostly jobs an intern hands off
+ * (researching accounts, reading a long thread). It runs on the intern's own
+ * model and its tokens count in full.
  */
-export const helperOnly: HookCallback = async (input) => {
+export const RESEARCH_AGENT = "general-purpose";
+
+const SUBAGENTS = [HELPER_AGENT, RESEARCH_AGENT];
+
+/**
+ * PreToolUse guard on the Agent tool. Only the helper and the research
+ * subagent are allowed, and the call is rebuilt so model/effort/isolation
+ * overrides can't move either off its model. It runs in the foreground: a
+ * headless run ends with its turn, so a background subagent's report would be
+ * lost.
+ */
+export const subagentGuard: HookCallback = async (input) => {
   if (input.hook_event_name !== "PreToolUse") return {};
   const args = (input.tool_input ?? {}) as Record<string, unknown>;
-  if (args.subagent_type !== HELPER_AGENT) {
+  const subagentType = args.subagent_type;
+  if (typeof subagentType !== "string" || !SUBAGENTS.includes(subagentType)) {
     return {
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
-        permissionDecisionReason: `Only the "${HELPER_AGENT}" subagent is available, for very small chores. Do anything bigger yourself.`,
+        permissionDecisionReason: `Only the "${HELPER_AGENT}" subagent (very small chores) and the "${RESEARCH_AGENT}" subagent (bigger research) are available.`,
       },
     };
   }
@@ -150,7 +161,7 @@ export const helperOnly: HookCallback = async (input) => {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "allow",
-      updatedInput: { description: args.description, prompt: args.prompt, subagent_type: HELPER_AGENT, run_in_background: false },
+      updatedInput: { description: args.description, prompt: args.prompt, subagent_type: subagentType, run_in_background: false },
     },
   };
 };
@@ -176,7 +187,8 @@ export function countUsage(modelUsage: Record<string, { inputTokens: number; out
 export function helperPrompt(owner = ownerName()): string {
   return `
 ## Helper
-For a very small, mechanical chore you can hand off, start the Agent tool with subagent_type "${HELPER_AGENT}". It runs on a small, fast model: good for exact, repetitive steps (tagging a batch of about 20 photos, looking up one fact, renaming files), not for writing, choosing, or anything that needs judgement. Give it one exact task, the commands and paths to use, and what to report back. Split a big chore into several helpers and check what they report. Anything for ${owner} (replies, drafts, picks, attachments) you do yourself.`;
+For a very small, mechanical chore you can hand off, start the Agent tool with subagent_type "${HELPER_AGENT}". It runs on a small, fast model: good for exact, repetitive steps (tagging a batch of about 20 photos, looking up one fact, renaming files), not for writing, choosing, or anything that needs judgement. Give it one exact task, the commands and paths to use, and what to report back. Split a big chore into several helpers and check what they report.
+For a bigger job that needs judgement but not ${owner}'s eye (researching accounts or sources, reading a long thread and summarising it), start subagent_type "${RESEARCH_AGENT}" instead: it runs on your own model and its tokens count in full against your daily cap, so use it when ${owner} asks for one or the job is big enough to be worth it. No other subagent is available. Anything for ${owner} (replies, drafts, picks, attachments) you do yourself.`;
 }
 
 /**
@@ -191,6 +203,9 @@ ${owner}'s messages may list attached files with absolute paths — read them di
 To send ${owner} a file (a document, screenshot, exported CSV, rendered image, SVG…), run:
   ${TOOLS_DIR}/intern-attach --intern <your-slug> --file <path> [--caption "..."]
 Anything you attach during a task is shown with your reply automatically; mention what it is in your text.
+To show ${owner} a few pictures (posts you found, photo picks, options to choose from), attach each image on its own, in the order you want them seen, with a short --caption, and --link <URL> when it comes from a web page (an Instagram post, an article). The app shows them as a gallery in the chat that ${owner} can open and swipe through, with "Open on instagram.com" for linked ones. Send up to about 10; for more, use a moodboard page. Don't stitch pictures into one grid image for ${owner}; contact sheets are for your own judging.
+Videos (.mp4, .mov, .webm up to 25 MB) attach the same way and play in the chat; for a reel, attach the video itself, not its cover.
+${owner} can heart a picture in the viewer, keep it on a board, or reply about one picture: a reply about a picture names it and gives you its file (open it with Read). Hearted pictures are listed in your instructions as taste to follow.
 To draw a chart, put a JSON spec in a \`\`\`chart fenced block in your reply and the app renders it natively (do not also attach a PNG):
   \`\`\`chart
   {"type":"bar","title":"Open PRs by repo","labels":["api","web","infra"],"series":[{"name":"Open","data":[4,9,2]}]}
@@ -239,6 +254,10 @@ To propose steps ${owner} can approve in one tap, end your reply with a checklis
 For a simple choice, offer quick-reply chips instead (${owner} taps one and it comes back as a reply):
   \`\`\`quick-replies
   {"options":["Yes","Not now"]}
+  \`\`\`
+To have ${owner} choose between pictures (which photo leads the carousel, which crop), attach each option with intern-attach, then add a pick block naming each attachment_id it printed, with a short label. The app shows the pictures as tappable cards instead of in the gallery, and ${owner}'s choice comes back as a reply quoting the picture ("Picked: Wing over haze"). Set "multiple": true (and a "submit" label) to let them choose several:
+  \`\`\`pick
+  {"question":"Which one leads the carousel?","options":[{"attachment":"<attachment_id>","label":"Wing over haze"},{"attachment":"<attachment_id>","label":"Field watch on rock"}]}
   \`\`\`
 
 ## Sign-off
@@ -338,6 +357,7 @@ export class SdkEngine implements Engine {
       manifest.persona ? `\n## Voice\n${manifest.persona}` : "",
       stylePrompt(manifest.style),
       reactionsPrompt(this.db, slug),
+      picturesPrompt(this.db, slug),
       manifest.guardrails.drafts_only
         ? "\n## Hard rule\nAnything outbound to other humans (email, messages) is DRAFTS ONLY — never send; produce a draft and surface it for approval."
         : "",
@@ -357,9 +377,10 @@ export class SdkEngine implements Engine {
       cwd: this.registry.internDir(slug),
       additionalDirectories: [this.registry.memoryDir(slug)],
       allowedTools: [...allowedToolsFor(manifest, this.registry.internDir(slug)), "Agent"],
-      // one subagent, the small-model helper; helperOnly refuses any other
+      // two subagents, the small-model helper and the built-in research one;
+      // subagentGuard refuses any other
       agents: { [HELPER_AGENT]: helperAgent() },
-      hooks: { PreToolUse: [{ matcher: "Agent", hooks: [helperOnly] }] },
+      hooks: { PreToolUse: [{ matcher: "Agent", hooks: [subagentGuard] }] },
       // Headless sessions can't answer permission prompts. "dontAsk" (default)
       // runs exactly what allowedTools lists — the catalog grants plus the
       // intern's own dir — and denies everything else. "bypassPermissions"

@@ -61,6 +61,10 @@ export const ImageIcon = (p: IconProps) => (
 export const UsersIcon = (p: IconProps) => (
   <Icon {...p} d="M16 19.5v-1.7a3.3 3.3 0 0 0-3.3-3.3H6.3A3.3 3.3 0 0 0 3 17.8v1.7M12.8 8a3.3 3.3 0 1 1-6.6 0 3.3 3.3 0 0 1 6.6 0Zm8.2 11.5v-1.7a3.3 3.3 0 0 0-2.5-3.2M15.5 4.9a3.3 3.3 0 0 1 0 6.3" />
 );
+export const PlayIcon = (p: IconProps) => <Icon {...p} d="M8 5.5v13l10.5-6.5Z" />;
+export const ShareIcon = (p: IconProps) => (
+  <Icon {...p} d="M12 3.5v11m0-11-4 4m4-4 4 4M8 10H6.5A1.5 1.5 0 0 0 5 11.5v7A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5H16" />
+);
 export const ReplyIcon = (p: IconProps) => <Icon {...p} d="M9.5 6.5 4 11.5l5.5 5M4.5 11.5H14a5.5 5.5 0 0 1 5.5 5.5v1.5" />;
 export const CopyIcon = (p: IconProps) => (
   <Icon {...p} d="M8.5 8.5V6A1.5 1.5 0 0 1 10 4.5h8A1.5 1.5 0 0 1 19.5 6v8a1.5 1.5 0 0 1-1.5 1.5h-2.5M6 8.5h8A1.5 1.5 0 0 1 15.5 10v8a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18v-8A1.5 1.5 0 0 1 6 8.5Z" />

@@ -16,6 +16,13 @@ not expire; this tool only reads that file.
   contact sheet and prints its path: open it with Read to judge an account's
   look in one go.
 
+  --save (profile, hashtag) keeps each post's full media under
+  $INTERNS_HOME/instagram/posts/<name>-<stamp>/ to attach in the chat:
+  <n>.jpg for an image, <n>.mp4 (+ <n>-cover.jpg) for a video or reel, and
+  <n>-1.jpg, <n>-2.mp4, ... for a carousel's slides. Each post lists its
+  "files"; "files_error" says why a post has none (no media URL, over 25 MB)
+  and "files_skipped" which slides were left out.
+
 HARD GUARDRAIL: research only. The token may carry wider permissions the
 owner granted for later (publishing, comments, messages); this CLI never
 uses them. Do not add publish, comment, like, follow or message commands —
@@ -25,7 +32,8 @@ approval card.
 Every command prints JSON; failures print {"error": "..."} and exit 1.
 IG_GRAPH_BASE overrides the API base (tests point it at a local fake).
 """
-import argparse, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
+import argparse, http.client, json, os, re, shutil, sys, time, urllib.error, urllib.parse, urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 GRAPH = os.environ.get("IG_GRAPH_BASE", "https://graph.facebook.com/v25.0").rstrip("/")
 HASHTAG_WEEKLY_LIMIT = 30
@@ -35,7 +43,12 @@ USERNAME = re.compile(r"^[A-Za-z0-9._]{1,30}$")
 PROFILE_FIELDS = "username,name,biography,website,followers_count,follows_count,media_count,profile_picture_url"
 MEDIA_FIELDS = "id,caption,media_type,media_product_type,like_count,comments_count,timestamp,permalink,media_url,thumbnail_url"
 HASHTAG_MEDIA_FIELDS = "id,caption,media_type,like_count,comments_count,timestamp,permalink,media_url"
+# Carousel slides, asked for only with --save (Graph expands the nested edge
+# in place); if an endpoint refuses one form, the next is tried.
+CHILDREN_TRIES = (",children{media_type,media_url,thumbnail_url}", ",children{media_type,media_url}", "")
 SHEET_MAX = 12
+SAVE_MAX_BYTES = 25 * 1024 * 1024  # the chat app's attachment limit (intern-attach)
+NO_MEDIA_URL = "Instagram gave no media URL for it (it withholds them for reels with copyrighted audio, among others)"
 
 
 def die(msg, code=1):
@@ -80,7 +93,14 @@ def explain(err, context):
     return msg
 
 
-def get(path, token, context=None, **params):
+class GraphError(Exception):
+    def __init__(self, err):
+        super().__init__(err.get("message"))
+        self.err = err
+
+
+def call(path, token, **params):
+    """One Graph GET; raises GraphError with Graph's error object."""
     params["access_token"] = token
     url = f"{GRAPH}/{path}?{urllib.parse.urlencode(params)}"
     try:
@@ -91,9 +111,31 @@ def get(path, token, context=None, **params):
             err = json.load(e).get("error", {})
         except ValueError:
             err = {"message": f"HTTP {e.code}"}
-        die(explain(err, context or {}))
+        raise GraphError(err)
     except (urllib.error.URLError, TimeoutError) as e:
         die(f"can't reach Instagram: {getattr(e, 'reason', e)}")
+
+
+def get(path, token, context=None, **params):
+    try:
+        return call(path, token, **params)
+    except GraphError as e:
+        die(explain(e.err, context or {}))
+
+
+def get_media(path, token, context, fields, slides, **params):
+    """GET with fields(extra); with slides, ask for carousel slides too, and
+    if Instagram refuses that nested field here (#100), ask with less.
+    Returns (body, note or None)."""
+    tries = CHILDREN_TRIES if slides else ("",)
+    for extra in tries[:-1]:
+        try:
+            return call(path, token, fields=fields(extra), **params), None
+        except GraphError as e:
+            if e.err.get("code") != 100:
+                die(explain(e.err, context or {}))
+    return (get(path, token, context, fields=fields(tries[-1]), **params),
+            "Instagram wouldn't list carousel slides here, so each carousel kept only its first slide." if slides else None)
 
 
 def trim(post):
@@ -118,14 +160,97 @@ def engagement(posts, followers):
             "likes_hidden_on": len(posts) - len(liked)}
 
 
-def sheet(posts, name):
-    """Download the posts' images (a video's cover) and draw one contact sheet.
-    Image URLs are dropped from the posts either way: they're long and expire."""
-    urls = []
-    for post in posts:
-        url = post.pop("media_url", None)
-        cover = post.pop("thumbnail_url", None)
-        urls.append(cover or url)
+def take_media(posts):
+    """Media URLs (and carousel slides) out of the posts, for --sheet and
+    --save: they're dropped from the answer either way, being long and expiring."""
+    return [{"media_type": p.get("media_type"), "media_url": p.pop("media_url", None),
+             "thumbnail_url": p.pop("thumbnail_url", None),
+             "children": (p.pop("children", None) or {}).get("data") or []} for p in posts]
+
+
+def media_folder(kind, name):
+    home = os.environ.get("INTERNS_HOME") or os.path.join(os.path.expanduser("~"), ".interns")
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    folder = os.path.join(home, "instagram", kind, f"{re.sub(r'[^A-Za-z0-9._-]', '_', name)}-{stamp}")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
+def download(url, stem, video):
+    """url → stem + .mp4/.jpg (by Content-Type, else by `video`), at most
+    SAVE_MAX_BYTES. Returns (path, None) or (None, reason)."""
+    tmp = stem + ".part"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "interns-ig-research"}), timeout=60) as res:
+            size = res.headers.get("Content-Length", "")
+            if size.isdigit() and int(size) > SAVE_MAX_BYTES:
+                return None, f"it's {int(size) / 1048576:.1f} MB, over the chat's 25 MB attachment limit"
+            ctype = res.headers.get("Content-Type", "")
+            ext = ".mp4" if ctype.startswith("video/") or (video and not ctype.startswith("image/")) else ".jpg"
+            total = 0
+            with open(tmp, "wb") as f:
+                while chunk := res.read(1 << 16):
+                    total += len(chunk)
+                    if total > SAVE_MAX_BYTES:
+                        raise OverflowError
+                    f.write(chunk)
+        os.replace(tmp, stem + ext)
+        return stem + ext, None
+    except OverflowError:
+        return None, "it's over the chat's 25 MB attachment limit"
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as e:
+        return None, f"the download failed ({getattr(e, 'reason', e)})"
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def save(posts, media, name):
+    """Each post's full media into one folder: posts gain "files" (and
+    "files_error" when none could be kept). Returns (summary, per-post preview
+    image or None, for the sheet to reuse)."""
+    folder = media_folder("posts", name)
+    jobs, plans = [], []
+    for n, m in enumerate(media):
+        carousel = m["media_type"] == "CAROUSEL_ALBUM" and bool(m["children"])
+        plan = []
+        for i, s in enumerate(m["children"] if carousel else [m]):
+            stem = os.path.join(folder, f"{n + 1}-{i + 1}" if carousel else f"{n + 1}")
+            video = s.get("media_type") in ("VIDEO", "REELS")
+            item = {"url": s.get("media_url"), "cover": s.get("thumbnail_url"), "label": f"slide {i + 1}: " if carousel else ""}
+            if item["url"]:
+                jobs.append((item, "main", item["url"], stem, video))
+            if item["cover"]:
+                jobs.append((item, "cover_file", item["cover"], stem + "-cover", False))
+            plan.append(item)
+        plans.append(plan)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        for (item, key, *_), result in zip(jobs, pool.map(lambda j: download(*j[2:]), jobs)):
+            item[key] = result
+    previews, saved = [], 0
+    for post, plan in zip(posts, plans):
+        files, problems, preview = [], [], None
+        for item in plan:
+            cover = (item.get("cover_file") or (None, None))[0]
+            path, reason = item.get("main") or (None, NO_MEDIA_URL)
+            if path:
+                kind = "video" if path.endswith(".mp4") else "image"
+                files.append({"path": path, "kind": kind, "cover": cover if kind == "video" else None})
+                preview = preview or (path if kind == "image" else cover)
+            else:
+                problems.append(f"{item['label']}{reason}" + (f"; its cover was saved: {cover}" if cover else ""))
+                preview = preview or cover
+        post["files"] = files
+        if problems:
+            post["files_error" if not files else "files_skipped"] = "; ".join(problems)
+        saved += len(files)
+        previews.append(preview)
+    return {"folder": folder, "files": saved}, previews
+
+
+def sheet(media, name, local=None):
+    """Download the posts' images (a video's cover) and draw one contact
+    sheet; `local` reuses images --save already downloaded."""
     if name is None:
         return None
     sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
@@ -133,15 +258,17 @@ def sheet(posts, name):
         from _sheet import contact_sheet
     except ImportError:
         return {"error": "Pillow isn't installed (pip install -r orchestrator/tools/requirements.txt)"}
-    home = os.environ.get("INTERNS_HOME") or os.path.join(os.path.expanduser("~"), ".interns")
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    folder = os.path.join(home, "instagram", "sheets", f"{re.sub(r'[^A-Za-z0-9._-]', '_', name)}-{stamp}")
-    os.makedirs(folder, exist_ok=True)
+    folder = media_folder("sheets", name)
     files = []
-    for n, url in enumerate(urls[:SHEET_MAX]):
+    for n, m in enumerate(media[:SHEET_MAX]):
+        path = os.path.join(folder, f"{n + 1}.jpg")
+        if local and local[n]:
+            shutil.copyfile(local[n], path)
+            files.append(path)
+            continue
+        url = m["thumbnail_url"] or m["media_url"]
         if not url:
             continue
-        path = os.path.join(folder, f"{n + 1}.jpg")
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "interns-ig-research"}), timeout=20) as res, open(path, "wb") as f:
                 f.write(res.read())
@@ -152,7 +279,8 @@ def sheet(posts, name):
     placed = contact_sheet(files, out, labels=[os.path.basename(f)[:-4] for f in files])
     if not placed:
         return {"error": "none of the post images could be downloaded"}
-    return {"path": out, "images": len(placed), "numbers": "match the post order in recent_posts / posts (1 = first)"}
+    return {"path": out, "images": len(placed), "numbers": "match the post order in recent_posts / posts (1 = first)",
+            "post_images": os.path.join(folder, "<number>.jpg")}
 
 
 def cmd_whoami(cfg, token, _args):
@@ -166,12 +294,24 @@ def cmd_profile(cfg, token, args):
     if not USERNAME.match(username):
         die(f"'{args.username}' isn't an Instagram username")
     n = max(1, min(args.posts, 50))
-    fields = f"business_discovery.username({username}){{{PROFILE_FIELDS},media.limit({n}){{{MEDIA_FIELDS}}}}}"
-    bd = get(cfg["ig_user_id"], token, {"username": username}, fields=fields).get("business_discovery") or {}
+    fields = lambda extra: f"business_discovery.username({username}){{{PROFILE_FIELDS},media.limit({n}){{{MEDIA_FIELDS}{extra}}}}}"
+    body, note = get_media(cfg["ig_user_id"], token, {"username": username}, fields, args.save)
+    bd = body.get("business_discovery") or {}
     posts = [trim(p) for p in (bd.pop("media", None) or {}).get("data", [])]
-    drawn = sheet(posts, username if args.sheet else None)
+    saved, drawn = keep(posts, username, args, note)
     return {**bd, "url": f"https://www.instagram.com/{bd.get('username', username)}/", "recent_posts": posts,
-            "engagement": engagement(posts, bd.get("followers_count")), **({"sheet": drawn} if drawn else {})}
+            "engagement": engagement(posts, bd.get("followers_count")), **saved, **drawn}
+
+
+def keep(posts, name, args, note):
+    """--save and --sheet for one command's posts → ({"saved": ...}, {"sheet": ...})."""
+    media = take_media(posts)
+    saved, previews = {}, None
+    if args.save:
+        summary, previews = save(posts, media, name)
+        saved = {"saved": {**summary, **({"note": note} if note else {})}}
+    drawn = sheet(media, name if args.sheet else None, previews)
+    return saved, ({"sheet": drawn} if drawn else {})
 
 
 def normalize_tag(raw):
@@ -189,11 +329,12 @@ def cmd_hashtag(cfg, token, args):
         die(f"Instagram has no hashtag #{tag}")
     edge = "recent_media" if args.recent else "top_media"
     n = max(1, min(args.limit, 50))
-    posts = get(f"{found[0]['id']}/{edge}", token, user_id=ig, fields=HASHTAG_MEDIA_FIELDS, limit=n).get("data") or []
-    posts = [trim(p) for p in posts[:n]]
-    drawn = sheet(posts, f"tag-{tag}" if args.sheet else None)
+    fields = lambda extra: HASHTAG_MEDIA_FIELDS + extra
+    body, note = get_media(f"{found[0]['id']}/{edge}", token, None, fields, args.save, user_id=ig, limit=n)
+    posts = [trim(p) for p in (body.get("data") or [])[:n]]
+    saved, drawn = keep(posts, f"tag-{tag}", args, note)
     return {"hashtag": tag, "sort": "recent" if args.recent else "top", "url": f"https://www.instagram.com/explore/tags/{tag}/",
-            "posts": posts, **({"sheet": drawn} if drawn else {}),
+            "posts": posts, **saved, **drawn,
             "note": "Instagram doesn't say who posted hashtag results; open a post's permalink to see the account."}
 
 
@@ -212,11 +353,13 @@ def main():
     p.add_argument("username")
     p.add_argument("--posts", type=int, default=12, help="recent posts to include (1-50, default 12)")
     p.add_argument("--sheet", action="store_true", help="also draw the first 12 posts as a contact sheet")
+    p.add_argument("--save", action="store_true", help="also keep each post's full image, carousel slides and video (.mp4) to attach in the chat")
     h = sub.add_parser("hashtag", help="top or recent posts for a hashtag (30 unique hashtags per 7 days)")
     h.add_argument("tag")
     h.add_argument("--recent", action="store_true", help="newest posts (last 24 hours) instead of top posts")
     h.add_argument("--limit", type=int, default=15, help="posts to return (1-50, default 15)")
     h.add_argument("--sheet", action="store_true", help="also draw the first 12 posts as a contact sheet")
+    h.add_argument("--save", action="store_true", help="also keep each post's full image, carousel slides and video (.mp4) to attach in the chat")
     sub.add_parser("quota", help="hashtags searched in the last 7 days")
     args = ap.parse_args()
     cfg, token = load_config()

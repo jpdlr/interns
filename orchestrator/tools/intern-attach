@@ -9,7 +9,7 @@
  * during a task lands on that task's reply message automatically.
  *
  * Usage:
- *   intern-attach --intern tessa --file ./chart.svg [--name "Q3 spend.svg"] [--caption "Spend by week"]
+ *   intern-attach --intern tessa --file ./chart.svg [--name "Q3 spend.svg"] [--caption "Spend by week"] [--link https://...]
  *   intern-attach list --intern tessa          # what has been exchanged in this thread
  *
  * All output is JSON on stdout; errors are {"error": "..."} with a nonzero exit.
@@ -27,7 +27,7 @@ const MIME = {
   json: "application/json", html: "text/html", zip: "application/zip",
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", mp4: "video/mp4",
+  mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm",
 };
 
 function out(obj) {
@@ -125,6 +125,7 @@ async function cmdUpload(flags) {
   const contentType = MIME[ext] || "application/octet-stream";
   const query = new URLSearchParams({ name, author: "intern" });
   if (flags.caption) query.set("caption", flags.caption);
+  if (flags.link) query.set("link", flags.link);
   const record = await api("POST", `/interns/${encodeURIComponent(intern)}/attachments?${query}`, {
     body: fs.readFileSync(file),
     contentType,
@@ -155,7 +156,7 @@ async function cmdList(flags) {
 }
 
 const USAGE = [
-  "intern-attach --intern <slug> --file <path> [--name <display name>] [--caption <text>]",
+  "intern-attach --intern <slug> --file <path> [--name <display name>] [--caption <text>] [--link <source page URL>]",
   "intern-attach list --intern <slug>",
 ].join("\n");
 

@@ -98,7 +98,7 @@ export interface TaskActivity {
   error: string | null;
 }
 
-export type AttachmentKind = "image" | "svg" | "file";
+export type AttachmentKind = "image" | "svg" | "video" | "file";
 
 /** A file exchanged in a thread — see orchestrator/src/attachments.ts. */
 export interface Attachment {
@@ -113,8 +113,14 @@ export interface Attachment {
   sha256: string;
   ext: string;
   caption: string | null;
+  /** the web page it comes from (an Instagram post, an article) */
+  link: string | null;
   width: number | null;
   height: number | null;
+  /** video length in seconds */
+  duration?: number | null;
+  /** hearted in the viewer; interns read these as taste */
+  liked?: boolean;
   created_at: string;
   /** app-relative, self-signed: `${baseUrl}${url}` needs no Authorization header */
   url: string;
@@ -138,6 +144,18 @@ export interface Message {
   ts: string;
   surface: MessageSurface;
   attachments: Attachment[];
+  /** the picture JP's message is about (a reply about one picture, or a pick) */
+  quote_attachment?: string | null;
+  quoted_attachment?: Attachment | null;
+}
+
+/** A card for an Instagram post linked in a message (orchestrator linkpreview.ts). */
+export interface LinkPreview {
+  url: string;
+  title: string | null;
+  source: string | null;
+  /** app-relative, self-signed */
+  image_url: string | null;
 }
 
 /** One-tap verdicts on an intern's message; enough of one kind moves a personality dial. */
@@ -854,11 +872,30 @@ export class InternsApi {
     return this.request<Message[]>(`/interns/${encodeURIComponent(slug)}/messages`);
   }
 
-  sendMessage(slug: string, text: string, attachmentIds: string[] = [], replyTo: string | null = null): Promise<SendMessageResult> {
+  sendMessage(slug: string, text: string, attachmentIds: string[] = [], replyTo: string | null = null, quoteAttachmentId: string | null = null): Promise<SendMessageResult> {
     return this.request<SendMessageResult>(`/interns/${encodeURIComponent(slug)}/messages`, {
       method: "POST",
-      body: JSON.stringify({ text, attachment_ids: attachmentIds, reply_to: replyTo }),
+      body: JSON.stringify({ text, attachment_ids: attachmentIds, reply_to: replyTo, quote_attachment_id: quoteAttachmentId }),
     });
+  }
+
+  /** Heart a picture (or take the heart back). */
+  likeAttachment(id: string, liked: boolean): Promise<Attachment> {
+    return this.request<Attachment>(`/attachments/${encodeURIComponent(id)}/like`, { method: "POST", body: JSON.stringify({ liked }) });
+  }
+
+  /** Keep a picture on a moodboard: `pageId`, or the thread's "Saved pictures" board. */
+  saveAttachmentToBoard(id: string, pageId?: string): Promise<{ page: PageHeader; item_id: string; already: boolean }> {
+    return this.request(`/attachments/${encodeURIComponent(id)}/save-to-board`, { method: "POST", body: JSON.stringify(pageId ? { page_id: pageId } : {}) });
+  }
+
+  /** The card for an Instagram post link, or null when there is nothing to show. */
+  async getLinkPreview(url: string): Promise<LinkPreview | null> {
+    try {
+      return await this.request<LinkPreview>(`/link-preview?url=${encodeURIComponent(url)}`);
+    } catch {
+      return null;
+    }
   }
 
   /** Start the coordinator's suggestion pass (returns at once; poll getSuggestStatus). */
@@ -985,6 +1022,22 @@ export class InternsApi {
   /** Absolute URL for <img src> / open-in-browser; add `download` for a save-as. */
   attachmentUrl(attachment: Pick<Attachment, "url">, download = false): string {
     return `${this.baseUrl}${attachment.url}${download ? "&download=1" : ""}`;
+  }
+
+  /**
+   * What to show for a picture or video at `width` CSS pixels: a JPEG scaled
+   * for the screen's density (a video's opening frame), else the original.
+   */
+  previewUrl(attachment: Pick<Attachment, "url" | "kind" | "mime">, width: number): string {
+    const px = Math.round(width * (typeof window !== "undefined" && window.devicePixelRatio ? Math.min(window.devicePixelRatio, 3) : 2));
+    if (attachment.kind === "video") return `${this.baseUrl}${attachment.url}&poster=1&w=${px}`;
+    if (attachment.kind !== "image" || attachment.mime === "image/gif") return this.attachmentUrl(attachment);
+    return `${this.baseUrl}${attachment.url}&w=${px}`;
+  }
+
+  /** A link card's image (or any app-relative signed path) as a full URL. */
+  absoluteUrl(path: string): string {
+    return path.startsWith("/") ? `${this.baseUrl}${path}` : path;
   }
 
   listCards(state?: CardState): Promise<Card[]> {
