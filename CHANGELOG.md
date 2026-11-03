@@ -107,6 +107,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 ### Changed
 - **Haiku 5.5 for every cheap call.** Mail triage, idea tags, responders, the advisor,
   suggestions and draft learning move from Haiku 4.5 to Haiku 5.5. Agent SDK 0.3.293.
+- **Dependencies updated.** Orchestrator: Agent SDK 0.3.317, Fastify 5.12.8, Zod 4.6.7,
+  better-sqlite3 13 (N-API, SQLite 3.53.4) and TypeScript 7. App: Expo SDK 57's latest patches
+  (Expo 57.0.31, Expo Router 57.0.29, React Native 0.86.3). `npm audit fix` clears the advisories
+  that need no major upgrade, among them proxy-addr (IP spoofing), undici, fast-uri, qs,
+  body-parser and the MCP SDK; the app's remaining ones wait for Expo SDK 58. CI actions move to v7.
 
 ### Fixed
 - **Interns can send a subagent out for research again.** The helper change allowed only the
