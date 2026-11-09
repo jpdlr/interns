@@ -21,17 +21,17 @@ updates:
       minor-and-patch:
         update-types: [minor, patch]
     # Expo pins a matching set of React Native packages; move them together with `npx expo install --fix`.
+    # React, React DOM and the react-native* packages are pinned to exact versions by the Expo SDK,
+    # so Dependabot leaves them alone entirely (its patch bumps go off-pin and miss peers such as
+    # react-native-worklets, which breaks `npm ci`).
     ignore:
       - dependency-name: "expo*"
         update-types: [version-update:semver-major]
       - dependency-name: "react-native*"
-        update-types: [version-update:semver-major, version-update:semver-minor]
       - dependency-name: "@expo/*"
         update-types: [version-update:semver-major]
       - dependency-name: "react"
-        update-types: [version-update:semver-major, version-update:semver-minor]
       - dependency-name: "react-dom"
-        update-types: [version-update:semver-major, version-update:semver-minor]
       # Also pinned by the Expo SDK (see `npx expo install --check`).
       - dependency-name: "@react-native-async-storage/async-storage"
         update-types: [version-update:semver-major]
