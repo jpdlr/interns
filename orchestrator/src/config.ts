@@ -9,7 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import webpush from "web-push";
+import * as webpush from "web-push";
 
 export const ConfigSchema = z.object({
   /** what the interns call you — in their prompts, greetings and standups */

@@ -9,7 +9,7 @@
  * failures never throw past notify(); callers (index.ts) still wrap the call
  * defensively since a bug here must never take the office down.
  */
-import webpush from "web-push";
+import * as webpush from "web-push";
 import { NOTIFY_BODY_CHARS, NOTIFY_TITLE_CHARS, notificationText, plainText } from "./notifytext.js";
 import { cardImportance, decide, getNotifySettings, globalQuiet, levelOf, localHhmm, messageImportance, suggestQuieter, summaryText, type Importance } from "./notify.js";
 import { quietNow } from "./rules.js";
