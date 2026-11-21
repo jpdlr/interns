@@ -5,10 +5,10 @@
   "dependencies": {
     "@expo/metro-runtime": "~57.0.12",
     "@react-native-async-storage/async-storage": "2.2.0",
-    "expo": "~57.0.32",
+    "expo": "~57.0.33",
     "expo-constants": "~57.0.13",
-    "expo-linking": "~57.0.13",
-    "expo-router": "~57.0.30",
+    "expo-linking": "~57.0.14",
+    "expo-router": "~57.0.31",
     "expo-splash-screen": "~57.0.11",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
